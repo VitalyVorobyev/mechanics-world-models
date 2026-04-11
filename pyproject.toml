@@ -5,14 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mechanics-world-models"
 version = "0.1.0"
-description = "Minimal visual model-based RL data collection baselines."
+description = "Mechanics-structured visual world model research baselines."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "dm-control>=1.0.38",
     "imageio>=2.34",
     "imageio-ffmpeg>=0.5",
+    "matplotlib>=3.8",
     "numpy>=1.26",
+    "rich>=13.7",
+    "torch>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +25,10 @@ dev = [
 
 [project.scripts]
 collect-cartpole = "data.collect_cartpole:main"
+dataset-stats = "data.dataset_stats:main"
 preview-dataset = "viz.preview_dataset:main"
+plot-training-history = "viz.plot_training_history:main"
+train-rssm = "train.train_rssm:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
