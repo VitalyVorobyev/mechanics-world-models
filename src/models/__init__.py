@@ -2,7 +2,13 @@
 
 from models.decoder import ImageDecoder
 from models.encoder import ConvEncoder
-from models.losses import compute_world_model_loss
+from models.losses import (
+    compute_latent_consistency_loss,
+    compute_transition_reconstruction_losses,
+    compute_world_model_loss,
+    foreground_reconstruction_mask,
+    foreground_saliency,
+)
 from models.rssm import RSSM, RSSMOutput
 from models.world_model import VisualWorldModel, WorldModelOutput
 
@@ -13,5 +19,9 @@ __all__ = [
     "RSSMOutput",
     "VisualWorldModel",
     "WorldModelOutput",
+    "compute_latent_consistency_loss",
+    "compute_transition_reconstruction_losses",
     "compute_world_model_loss",
+    "foreground_reconstruction_mask",
+    "foreground_saliency",
 ]

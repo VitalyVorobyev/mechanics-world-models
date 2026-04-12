@@ -14,6 +14,7 @@ dependencies = [
     "imageio-ffmpeg>=0.5",
     "matplotlib>=3.8",
     "numpy>=1.26",
+    "pillow>=10",
     "rich>=13.7",
     "torch>=2.2",
 ]
@@ -26,6 +27,12 @@ dev = [
 [project.scripts]
 collect-cartpole = "data.collect_cartpole:main"
 dataset-stats = "data.dataset_stats:main"
+dataset-image-diagnostics = "eval.dataset_diagnostics:main"
+debug-reconstruction = "eval.debug_reconstruction:main"
+eval-rssm = "eval.eval_rssm:main"
+foreground-mask-preview = "eval.foreground_masks:main"
+overfit-reconstruction = "eval.overfit_reconstruction:main"
+preview-crop = "viz.preview_crop:main"
 preview-dataset = "viz.preview_dataset:main"
 plot-training-history = "viz.plot_training_history:main"
 train-rssm = "train.train_rssm:main"

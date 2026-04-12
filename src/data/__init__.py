@@ -2,12 +2,14 @@
 
 from importlib import import_module
 
+from data.image_transforms import ImageCropConfig
 from data.trajectory import Trajectory, load_trajectory_npz, save_trajectory_npz
 
 __all__ = [
     "DatasetStats",
     "EpisodeInfo",
     "EpisodeSequenceDataset",
+    "ImageCropConfig",
     "SequenceLocation",
     "Trajectory",
     "compute_dataset_stats",

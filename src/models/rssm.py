@@ -92,10 +92,8 @@ class RSSM(nn.Module):
         deter_states: list[torch.Tensor] = []
 
         for step in range(sequence_length):
-            # Inputs are [B, Z] and [B, A]; GRU output h_t is [B, H].
-            recurrent_input = torch.cat([z_t, actions[:, step]], dim=-1)
-            h_t = self.recurrent(recurrent_input, h_t)
-
+            # h_t is the deterministic state for obs_t. At t=0 it is zero; at
+            # later steps it has already been advanced by action_{t-1}.
             # Prior p(z_t | h_t): each parameter tensor is [B, Z].
             prior_mean, prior_std = self._dist_params(self.prior(h_t))
 
@@ -110,6 +108,11 @@ class RSSM(nn.Module):
             posterior_stds.append(posterior_std)
             latents.append(z_t)
             deter_states.append(h_t)
+
+            # action_t advances obs_t to obs_{t+1}; this h_{t+1} is used by the
+            # next loop iteration and by transition-aligned prediction helpers.
+            recurrent_input = torch.cat([z_t, actions[:, step]], dim=-1)
+            h_t = self.recurrent(recurrent_input, h_t)
 
         return RSSMOutput(
             prior_mean=torch.stack(prior_means, dim=1),

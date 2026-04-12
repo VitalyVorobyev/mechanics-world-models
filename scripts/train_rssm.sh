@@ -1,0 +1,16 @@
+.venv/bin/train-rssm \
+  --dataset-dir data/cartpole-swingup-random-100k \
+  --checkpoint-dir checkpoints/rssm-cartpole-aligned-fg20-kl1e5-latent001 \
+  --sequence-length 32 \
+  --batch-size 32 \
+  --learning-rate 3e-4 \
+  --epochs 1 \
+  --kl-weight 1e-5 \
+  --reconstruction-weight 0.0 \
+  --foreground-reconstruction-weight 20.0 \
+  --foreground-mask-floor 0.02 \
+  --foreground-mask-kernel-size 7 \
+  --dynamic-reconstruction-weight 0.0 \
+  --latent-consistency-weight 0.01 \
+  --device auto \
+  --log-every-steps 100

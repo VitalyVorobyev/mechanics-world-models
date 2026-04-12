@@ -26,6 +26,11 @@ direction.
   stats, training, plotting, testing, and debugging commands.
 - Keep research framing in `docs/research_spec.md`; do not silently rewrite the
   hypotheses, baselines, or kill criteria without an explicit task.
+- Keep one clear, concise document in `docs/models/` for every trainable model.
+  Each model document must cover purpose, architecture and parameter count,
+  objective function, optimizer, and relation to other models. Add a document
+  when introducing a new trainable model and update it when changing the model,
+  loss, optimizer, or default training configuration.
 
 ## Code Organization
 
@@ -36,6 +41,7 @@ direction.
 - Put encoders, decoders, RSSM dynamics, world-model wrappers, and losses under
   `src/models/`.
 - Put offline training entry points under `src/train/`.
+- Put checkpoint evaluation and scalar metric code under `src/eval/`.
 - Put previews and plotting utilities under `src/viz/`.
 
 ## Data And Tensor Conventions
@@ -46,11 +52,14 @@ direction.
   images and `N` action/reward/discount/done entries.
 - Sequence dataset samples use:
   - `observations`: `[T, C, H, W]`, float32 in `[0, 1]`
+  - `next_observations`: `[T, C, H, W]`, float32 in `[0, 1]`, aligned as
+    `obs_t --action_t--> obs_{t+1}`
   - `actions`: `[T, A]`, float32
   - `rewards`: `[T]`, float32
   - `dones`: `[T]`, bool
 - Dataloader batches use:
   - `observations`: `[B, T, 3, 84, 84]`
+  - `next_observations`: `[B, T, 3, 84, 84]`
   - `actions`: `[B, T, A]`
   - `rewards`: `[B, T]`
   - `dones`: `[B, T]`

@@ -2,9 +2,11 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.DS_Store
 *.egg-info/
 
 /data/
 /previews/
 /checkpoints/
+/eval/
 rlpapers

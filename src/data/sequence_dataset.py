@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from data.image_transforms import ImageCropConfig, apply_image_crop_resize
 from data.trajectory import Trajectory, load_trajectory_npz
 
 SplitName = Literal["train", "val"]
@@ -116,6 +117,7 @@ class EpisodeSequenceDataset(Dataset):
         val_fraction: float = 0.1,
         seed: int = 0,
         max_episodes: int | None = None,
+        crop_config: ImageCropConfig | None = None,
     ) -> None:
         if sequence_length < 1:
             raise ValueError("sequence_length must be >= 1")
@@ -128,6 +130,7 @@ class EpisodeSequenceDataset(Dataset):
         self.val_fraction = val_fraction
         self.seed = seed
         self.max_episodes = max_episodes
+        self.crop_config = crop_config or ImageCropConfig()
 
         all_paths = index_episode_files(self.dataset_dir)
         split_paths = split_episode_files(all_paths, split, val_fraction, seed)
@@ -192,17 +195,21 @@ class EpisodeSequenceDataset(Dataset):
         trajectory = load_trajectory_npz(location.path)
         start = location.start
         end = start + self.sequence_length
-        return _trajectory_slice_to_tensors(trajectory, start, end)
+        return _trajectory_slice_to_tensors(trajectory, start, end, crop_config=self.crop_config)
 
 
 def _trajectory_slice_to_tensors(
     trajectory: Trajectory,
     start: int,
     end: int,
+    crop_config: ImageCropConfig | None = None,
 ) -> dict[str, torch.Tensor]:
     """Convert a transition-aligned trajectory slice into PyTorch tensors."""
 
-    observations_np = trajectory.images[start:end].astype(np.float32) / 255.0
+    images = apply_image_crop_resize(trajectory.images[start:end], crop_config)
+    next_images = apply_image_crop_resize(trajectory.images[start + 1 : end + 1], crop_config)
+    observations_np = images.astype(np.float32) / 255.0
+    next_observations_np = next_images.astype(np.float32) / 255.0
     actions_np = np.asarray(trajectory.actions[start:end], dtype=np.float32)
     rewards_np = np.asarray(trajectory.rewards[start:end], dtype=np.float32)
     dones_np = np.asarray(trajectory.dones[start:end], dtype=np.bool_)
@@ -211,12 +218,14 @@ def _trajectory_slice_to_tensors(
         actions_np = actions_np[:, None]
 
     observations = torch.from_numpy(observations_np).permute(0, 3, 1, 2).contiguous()
+    next_observations = torch.from_numpy(next_observations_np).permute(0, 3, 1, 2).contiguous()
     actions = torch.from_numpy(actions_np)
     rewards = torch.from_numpy(rewards_np)
     dones = torch.from_numpy(dones_np)
 
     return {
         "observations": observations,
+        "next_observations": next_observations,
         "actions": actions,
         "rewards": rewards,
         "dones": dones,
@@ -228,6 +237,7 @@ def make_train_val_datasets(
     sequence_length: int,
     val_fraction: float = 0.1,
     seed: int = 0,
+    crop_config: ImageCropConfig | None = None,
 ) -> tuple[EpisodeSequenceDataset, EpisodeSequenceDataset]:
     """Build deterministic train and validation sequence datasets."""
 
@@ -237,6 +247,7 @@ def make_train_val_datasets(
         split="train",
         val_fraction=val_fraction,
         seed=seed,
+        crop_config=crop_config,
     )
     val = EpisodeSequenceDataset(
         dataset_dir=dataset_dir,
@@ -244,5 +255,6 @@ def make_train_val_datasets(
         split="val",
         val_fraction=val_fraction,
         seed=seed,
+        crop_config=crop_config,
     )
     return train, val

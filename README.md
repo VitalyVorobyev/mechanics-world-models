@@ -11,6 +11,10 @@ control under shifted mass, length, friction, camera pose, background, and
 lighting.
 
 The full research plan is in [`docs/research_spec.md`](docs/research_spec.md).
+Trainable model notes live in [`docs/models/`](docs/models/), starting with the
+current [minimal RSSM visual world model](docs/models/rssm_visual_world_model.md).
+The current baseline status and the foreground-reconstruction debugging problem
+are summarized in [`docs/current_status.md`](docs/current_status.md).
 
 ## Current Status
 
@@ -21,7 +25,8 @@ needed before adding the mechanics prior:
 - one-episode-per-file `.npz` storage with 84x84 RGB observations
 - a PyTorch sequence dataset for recurrent world-model training
 - a compact RSSM-style visual world model
-- an offline trainer with JSONL loss history, checkpoints, and loss plotting
+- an offline trainer with JSONL loss history, checkpoints, loss plotting, and
+  an opt-in transition-aligned latent consistency objective
 - small tests for the environment wrapper, dataset layer, model shapes, losses,
   and training-history plotting
 
@@ -93,6 +98,29 @@ Train the RSSM baseline:
   --device auto
 ```
 
+For the current foreground/debugging experiment, keep the decoder for
+diagnostics but downweight full-frame pixel MSE, add a posterior foreground
+reconstruction term, and train the transition-prior decoder directly against
+`obs_{t+1}` with a foreground-weighted next-frame term:
+
+```bash
+.venv/bin/train-rssm \
+  --dataset-dir data/cartpole-swingup-random \
+  --checkpoint-dir checkpoints/rssm-cartpole-foreground-transition \
+  --sequence-length 16 \
+  --batch-size 32 \
+  --epochs 10 \
+  --reconstruction-weight 0.05 \
+  --foreground-reconstruction-weight 2.0 \
+  --foreground-mask-floor 0.02 \
+  --foreground-mask-kernel-size 7 \
+  --transition-reconstruction-weight 0.0 \
+  --foreground-transition-reconstruction-weight 2.0 \
+  --dynamic-reconstruction-weight 0.0 \
+  --latent-consistency-weight 0.0 \
+  --device auto
+```
+
 Plot the loss history:
 
 ```bash
@@ -100,6 +128,54 @@ Plot the loss history:
   --history-path checkpoints/rssm-cartpole/history.jsonl \
   --output-path checkpoints/rssm-cartpole/loss_history.png
 ```
+
+Evaluate reconstruction and open-loop prediction quality:
+
+```bash
+.venv/bin/eval-rssm \
+  --checkpoint-path checkpoints/rssm-cartpole/latest.pt \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-dir eval/rssm-cartpole \
+  --sequence-length 16 \
+  --warmup-length 5 \
+  --horizons 1 5 10
+```
+
+Debug missing foreground reconstructions:
+
+```bash
+.venv/bin/preview-crop \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-path eval/crop-preview.png \
+  --crop-mode center \
+  --crop-height 64 \
+  --crop-width 64
+
+.venv/bin/debug-reconstruction \
+  --checkpoint-path checkpoints/rssm-cartpole/latest.pt \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-dir eval/debug-reconstruction \
+  --sequence-length 16 \
+  --timesteps 0 5 10 15
+
+.venv/bin/overfit-reconstruction \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-dir eval/overfit-one-batch \
+  --sequence-length 16 \
+  --mode batch \
+  --batch-size 4 \
+  --steps 500 \
+  --save-every 100 \
+  --kl-weight 0.0
+
+.venv/bin/dataset-image-diagnostics \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-dir eval/dataset-images \
+  --max-frames 10000
+```
+
+The same crop flags can be passed to `train-rssm` and `eval-rssm`. Evaluation
+falls back to the checkpoint crop config when no crop flags are provided.
 
 On Linux or other headless machines, MuJoCo may need an explicit offscreen
 backend:

@@ -21,7 +21,23 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-DEFAULT_METRICS = ("total_loss", "reconstruction_loss", "kl_loss", "weighted_kl_loss")
+DEFAULT_METRICS = (
+    "total_loss",
+    "reconstruction_loss",
+    "weighted_reconstruction_loss",
+    "foreground_reconstruction_loss",
+    "weighted_foreground_reconstruction_loss",
+    "transition_reconstruction_loss",
+    "weighted_transition_reconstruction_loss",
+    "foreground_transition_reconstruction_loss",
+    "weighted_foreground_transition_reconstruction_loss",
+    "dynamic_reconstruction_loss",
+    "weighted_dynamic_reconstruction_loss",
+    "kl_loss",
+    "weighted_kl_loss",
+    "latent_consistency_loss",
+    "weighted_latent_consistency_loss",
+)
 DEFAULT_SPLITS = ("train", "train_epoch", "val")
 
 
