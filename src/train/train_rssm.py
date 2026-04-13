@@ -1029,18 +1029,35 @@ def capture_rng_state() -> dict[str, Any]:
 
 
 def restore_rng_state(state: dict[str, Any]) -> None:
-    """Restore RNG state captured by ``capture_rng_state``."""
+    """Restore RNG state captured by ``capture_rng_state``.
+
+    ``torch.load(map_location=device)`` relocates every tensor in the
+    checkpoint — including the RNG state ByteTensors — onto the training
+    device. ``torch.set_rng_state`` and its CUDA/MPS counterparts require
+    their inputs on the native RNG device (CPU for the default generator)
+    and in ``uint8`` dtype, so we normalize every tensor before restoring.
+    """
 
     if "python" in state:
         random.setstate(state["python"])
     if "numpy" in state:
         np.random.set_state(state["numpy"])
     if "torch_cpu" in state:
-        torch.set_rng_state(state["torch_cpu"])
+        torch.set_rng_state(_as_cpu_byte_tensor(state["torch_cpu"]))
     if "torch_cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
+        torch.cuda.set_rng_state_all(
+            [_as_cpu_byte_tensor(cuda_state) for cuda_state in state["torch_cuda"]]
+        )
     if "torch_mps" in state and torch.backends.mps.is_available():
-        torch.mps.set_rng_state(state["torch_mps"])
+        torch.mps.set_rng_state(_as_cpu_byte_tensor(state["torch_mps"]))
+
+
+def _as_cpu_byte_tensor(tensor: Any) -> torch.Tensor:
+    """Coerce an RNG state tensor back onto CPU with ``uint8`` dtype."""
+
+    if not isinstance(tensor, torch.Tensor):
+        return tensor
+    return tensor.detach().to(device="cpu", dtype=torch.uint8)
 
 
 def resolve_resume_path(config: TrainConfig, console: Console) -> Path | None:

@@ -10,7 +10,7 @@
     --lr-schedule cosine \
     --kl-weight 1.0 \
     --kl-balance-alpha 0.8 \
-    --kl-free-nats 3.0 \
+    --kl-free-nats 0.5 \
     --reconstruction-weight 0.0 \
     --foreground-reconstruction-weight 2.0 \
     --foreground-mask-floor 0.02 \

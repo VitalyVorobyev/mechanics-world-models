@@ -896,6 +896,37 @@ def test_capture_and_restore_rng_state_round_trip() -> None:
     assert torch.equal(drawn_first, drawn_after)
 
 
+def test_restore_rng_state_normalizes_non_byte_dtype() -> None:
+    """Regression for the ``map_location`` bug: on resume through a non-CPU
+    device, ``torch.load`` relocates the RNG ByteTensor into non-CPU memory
+    and/or a non-uint8 dtype, which ``torch.set_rng_state`` rejects. The
+    restore helper must coerce back to CPU/uint8 without raising.
+    """
+
+    torch.manual_seed(7)
+    state = capture_rng_state()
+    # Simulate the post-load shape: same byte payload, different dtype.
+    state["torch_cpu"] = state["torch_cpu"].to(dtype=torch.int64).to(dtype=torch.uint8)
+    restore_rng_state(state)  # must not raise
+
+
+def test_restore_rng_state_round_trip_through_torch_save_load(tmp_path: Path) -> None:
+    """End-to-end check of the exact save → torch.load path that broke resume.
+
+    ``torch.load(map_location="cpu")`` is the tamest codepath, but it still
+    goes through ``_rebuild_tensor_v2`` on every tensor, which is what
+    clobbered the dtype in production. This guards against any future
+    regression in that path.
+    """
+
+    torch.manual_seed(1)
+    payload = {"rng_state": capture_rng_state()}
+    path = tmp_path / "rng.pt"
+    torch.save(payload, path)
+    loaded = torch.load(path, map_location="cpu", weights_only=False)
+    restore_rng_state(loaded["rng_state"])  # must not raise
+
+
 def test_reward_head_emits_per_step_predictions() -> None:
     model = VisualWorldModel(
         action_dim=2,
