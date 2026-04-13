@@ -204,7 +204,15 @@ def _trajectory_slice_to_tensors(
     end: int,
     crop_config: ImageCropConfig | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Convert a transition-aligned trajectory slice into PyTorch tensors."""
+    """Convert a transition-aligned trajectory slice into PyTorch tensors.
+
+    When the trajectory carries simulator ground truth (``qpos``/``qvel``),
+    they are added to the sample dict as ``physics_qpos`` / ``physics_qvel``
+    aligned to ``observations`` (i.e. ``physics_qpos[t]`` is the state at
+    ``obs_t``) and ``physics_qpos_next`` / ``physics_qvel_next`` aligned to
+    ``next_observations``. Training never reads these — they exist for
+    diagnostics, linear probes and energy-tracking eval.
+    """
 
     images = apply_image_crop_resize(trajectory.images[start:end], crop_config)
     next_images = apply_image_crop_resize(trajectory.images[start + 1 : end + 1], crop_config)
@@ -223,13 +231,21 @@ def _trajectory_slice_to_tensors(
     rewards = torch.from_numpy(rewards_np)
     dones = torch.from_numpy(dones_np)
 
-    return {
+    sample: dict[str, torch.Tensor] = {
         "observations": observations,
         "next_observations": next_observations,
         "actions": actions,
         "rewards": rewards,
         "dones": dones,
     }
+    if trajectory.qpos is not None and trajectory.qvel is not None:
+        qpos = trajectory.qpos.astype(np.float32)
+        qvel = trajectory.qvel.astype(np.float32)
+        sample["physics_qpos"] = torch.from_numpy(qpos[start:end])
+        sample["physics_qvel"] = torch.from_numpy(qvel[start:end])
+        sample["physics_qpos_next"] = torch.from_numpy(qpos[start + 1 : end + 1])
+        sample["physics_qvel_next"] = torch.from_numpy(qvel[start + 1 : end + 1])
+    return sample
 
 
 def make_train_val_datasets(

@@ -26,6 +26,9 @@ def compute_world_model_loss(
     kl_free_nats: float = 3.0,
     imagination_reconstruction_weight: float = 0.0,
     foreground_imagination_reconstruction_weight: float = 0.0,
+    reward_weight: float = 0.0,
+    imagined_reward_weight: float = 0.0,
+    rewards: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compute reconstruction, RSSM KL, and optional transition/latent losses.
 
@@ -133,6 +136,14 @@ def compute_world_model_loss(
     weighted_kl_loss = kl_weight * kl_loss
     latent_consistency_loss = compute_latent_consistency_loss(outputs, latent_consistency_weight)
     weighted_latent_consistency_loss = latent_consistency_weight * latent_consistency_loss
+    reward_loss, imagined_reward_loss = compute_reward_losses(
+        outputs=outputs,
+        rewards=rewards,
+        reward_weight=reward_weight,
+        imagined_reward_weight=imagined_reward_weight,
+    )
+    weighted_reward_loss = reward_weight * reward_loss
+    weighted_imagined_reward_loss = imagined_reward_weight * imagined_reward_loss
     total_loss = (
         weighted_reconstruction_loss
         + weighted_dynamic_reconstruction_loss
@@ -143,6 +154,8 @@ def compute_world_model_loss(
         + weighted_foreground_imagination_reconstruction_loss
         + weighted_kl_loss
         + weighted_latent_consistency_loss
+        + weighted_reward_loss
+        + weighted_imagined_reward_loss
     )
     return {
         "total_loss": total_loss,
@@ -171,7 +184,74 @@ def compute_world_model_loss(
         "kl_free_nats_active": kl_parts["kl_free_nats_active"],
         "latent_consistency_loss": latent_consistency_loss,
         "weighted_latent_consistency_loss": weighted_latent_consistency_loss,
+        "reward_loss": reward_loss,
+        "weighted_reward_loss": weighted_reward_loss,
+        "imagined_reward_loss": imagined_reward_loss,
+        "weighted_imagined_reward_loss": weighted_imagined_reward_loss,
     }
+
+
+def compute_reward_losses(
+    outputs: WorldModelOutput,
+    rewards: torch.Tensor | None,
+    reward_weight: float,
+    imagined_reward_weight: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Posterior and imagined reward MSE against the dataloader rewards.
+
+    Posterior reward predictions at index ``t`` target ``rewards[:, t]``, the
+    reward observed for the transition ``obs_t --action_t--> obs_{t+1}``.
+    Imagined reward predictions at imagined index ``k`` target
+    ``rewards[:, K_ctx - 1 + k]`` so the reward head learns to score open-loop
+    rollouts the way MPC will use it.
+    """
+
+    if reward_weight < 0.0:
+        raise ValueError("reward_weight must be >= 0")
+    if imagined_reward_weight < 0.0:
+        raise ValueError("imagined_reward_weight must be >= 0")
+
+    zero = outputs.reconstructions.new_zeros(())
+    if reward_weight == 0.0 and imagined_reward_weight == 0.0:
+        return zero, zero
+    if outputs.reward_predictions is None:
+        raise ValueError(
+            "reward_head=True must be set on the model when reward_weight > 0",
+        )
+    if rewards is None:
+        raise ValueError(
+            "rewards tensor must be passed to the loss when reward weights are > 0",
+        )
+    if outputs.reward_predictions.shape != rewards.shape:
+        raise ValueError(
+            f"reward shape mismatch: predictions {outputs.reward_predictions.shape} "
+            f"vs targets {rewards.shape}",
+        )
+
+    posterior_loss = (
+        F.mse_loss(outputs.reward_predictions, rewards)
+        if reward_weight > 0.0
+        else zero
+    )
+
+    if imagined_reward_weight > 0.0:
+        if outputs.imagined_reward_predictions is None or outputs.imagined_target_start is None:
+            raise ValueError(
+                "imagination_horizon must be > 0 on the model when "
+                "imagined_reward_weight > 0",
+            )
+        target_start = outputs.imagined_target_start
+        horizon = outputs.imagined_reward_predictions.shape[1]
+        if rewards.shape[1] < target_start + horizon:
+            raise ValueError(
+                "rewards too short for imagination targets: "
+                f"need length {target_start + horizon}, got {rewards.shape[1]}",
+            )
+        target = rewards[:, target_start : target_start + horizon]
+        imagined_loss = F.mse_loss(outputs.imagined_reward_predictions, target)
+    else:
+        imagined_loss = zero
+    return posterior_loss, imagined_loss
 
 
 def compute_rssm_kl_loss(

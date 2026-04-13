@@ -5,6 +5,7 @@ from models.encoder import ConvEncoder
 from models.losses import (
     compute_imagination_reconstruction_losses,
     compute_latent_consistency_loss,
+    compute_reward_losses,
     compute_rssm_kl_loss,
     compute_transition_reconstruction_losses,
     compute_world_model_loss,
@@ -23,6 +24,7 @@ __all__ = [
     "WorldModelOutput",
     "compute_imagination_reconstruction_losses",
     "compute_latent_consistency_loss",
+    "compute_reward_losses",
     "compute_rssm_kl_loss",
     "compute_transition_reconstruction_losses",
     "compute_world_model_loss",

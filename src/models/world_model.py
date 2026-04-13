@@ -26,6 +26,8 @@ class WorldModelOutput:
     imagined_reconstructions: torch.Tensor | None = None
     imagined_features: torch.Tensor | None = None
     imagined_target_start: int | None = None
+    reward_predictions: torch.Tensor | None = None
+    imagined_reward_predictions: torch.Tensor | None = None
 
 
 class VisualWorldModel(nn.Module):
@@ -39,6 +41,8 @@ class VisualWorldModel(nn.Module):
         latent_size: int,
         image_size: int = 84,
         input_channels: int = 3,
+        reward_head: bool = False,
+        reward_head_hidden_size: int = 200,
     ) -> None:
         super().__init__()
         self.action_dim = action_dim
@@ -47,6 +51,7 @@ class VisualWorldModel(nn.Module):
         self.latent_size = latent_size
         self.image_size = image_size
         self.input_channels = input_channels
+        self.reward_head_enabled = reward_head
 
         self.encoder = ConvEncoder(embedding_size=embedding_size, input_channels=input_channels)
         self.rssm = RSSM(
@@ -65,6 +70,22 @@ class VisualWorldModel(nn.Module):
             nn.ELU(),
             nn.Linear(embedding_size, embedding_size),
         )
+        # Reward head is opt-in: MPC and the research-spec primary metric need
+        # it, but the Phase-0 prediction-only baseline does not. Adding this
+        # flag preserves checkpoint compatibility — old checkpoints have no
+        # reward_head.* keys, and load_checkpoint treats those as new optional
+        # parameters initialized from defaults.
+        self.reward_head: nn.Module | None
+        if reward_head:
+            self.reward_head = nn.Sequential(
+                nn.Linear(hidden_size + latent_size, reward_head_hidden_size),
+                nn.ELU(),
+                nn.Linear(reward_head_hidden_size, reward_head_hidden_size),
+                nn.ELU(),
+                nn.Linear(reward_head_hidden_size, 1),
+            )
+        else:
+            self.reward_head = None
 
     def forward(
         self,
@@ -100,7 +121,11 @@ class VisualWorldModel(nn.Module):
         # decoder is trained on the exact representation used at eval time. The
         # sampled z still lives inside the RSSM rollout, advancing h_{t+1} and
         # shaping the KL term, which is what carries the stochasticity signal.
-        reconstructions = self.decoder(rssm_output.features_posterior_mean)
+        posterior_features = rssm_output.features_posterior_mean
+        reconstructions = self.decoder(posterior_features)
+        reward_predictions: torch.Tensor | None = None
+        if self.reward_head is not None:
+            reward_predictions = self.reward_head(posterior_features).squeeze(-1)
         next_embeddings: torch.Tensor | None = None
         predicted_next_embeddings: torch.Tensor | None = None
         next_prior_features: torch.Tensor | None = None
@@ -117,6 +142,7 @@ class VisualWorldModel(nn.Module):
         imagined_reconstructions: torch.Tensor | None = None
         imagined_features: torch.Tensor | None = None
         imagined_target_start: int | None = None
+        imagined_reward_predictions: torch.Tensor | None = None
         if imagination_horizon > 0 or imagination_context_steps > 0:
             imagined_reconstructions, imagined_features, imagined_target_start = (
                 self.imagine_from_posterior(
@@ -126,6 +152,8 @@ class VisualWorldModel(nn.Module):
                     horizon=imagination_horizon,
                 )
             )
+            if self.reward_head is not None and imagined_features is not None:
+                imagined_reward_predictions = self.reward_head(imagined_features).squeeze(-1)
 
         return WorldModelOutput(
             embeddings=embeddings,
@@ -138,6 +166,8 @@ class VisualWorldModel(nn.Module):
             imagined_reconstructions=imagined_reconstructions,
             imagined_features=imagined_features,
             imagined_target_start=imagined_target_start,
+            reward_predictions=reward_predictions,
+            imagined_reward_predictions=imagined_reward_predictions,
         )
 
     def imagine_from_posterior(
@@ -190,21 +220,117 @@ class VisualWorldModel(nn.Module):
         if actions.shape[-1] != self.action_dim:
             raise ValueError(f"expected action_dim={self.action_dim}, got {actions.shape[-1]}")
 
-        h_t = rssm_output.deter_states[:, context_steps - 1]
-        z_t = rssm_output.posterior_mean[:, context_steps - 1]
+        h_start = rssm_output.deter_states[:, context_steps - 1]
+        z_start = rssm_output.posterior_mean[:, context_steps - 1]
+        rollout_actions = actions[:, context_steps - 1 : context_steps - 1 + horizon]
+        imagined_features = self.imagine_rollout_features(h_start, z_start, rollout_actions)
+        imagined_reconstructions = self.decoder(imagined_features)
+        target_start = context_steps - 1
+        return imagined_reconstructions, imagined_features, target_start
+
+    def imagine_rollout_features(
+        self,
+        deter_start: torch.Tensor,
+        stoch_start: torch.Tensor,
+        actions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Roll the prior forward for ``actions.shape[1]`` steps from ``(h, z)``.
+
+        Returns features ``[B, K, H + Z]``. Re-used by ``imagine_from_posterior``
+        and by the CEM planner, which calls this with ``B = n_samples`` and
+        differing action sequences sharing the same start state. No decoder /
+        reward-head invocation here so callers can choose what to compute.
+        """
+
+        if deter_start.ndim != 2 or deter_start.shape[-1] != self.hidden_size:
+            raise ValueError(
+                f"deter_start must have shape [B, hidden_size={self.hidden_size}]; "
+                f"got {tuple(deter_start.shape)}",
+            )
+        if stoch_start.ndim != 2 or stoch_start.shape[-1] != self.latent_size:
+            raise ValueError(
+                f"stoch_start must have shape [B, latent_size={self.latent_size}]; "
+                f"got {tuple(stoch_start.shape)}",
+            )
+        if actions.ndim != 3 or actions.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"actions must have shape [B, K, action_dim={self.action_dim}]; "
+                f"got {tuple(actions.shape)}",
+            )
+        if actions.shape[0] != deter_start.shape[0]:
+            raise ValueError("actions batch size must match deter_start batch size")
+
+        h_t = deter_start
+        z_t = stoch_start
+        horizon = actions.shape[1]
         features_list: list[torch.Tensor] = []
         for step in range(horizon):
-            action_t = actions[:, context_steps - 1 + step]
+            action_t = actions[:, step]
             recurrent_input = torch.cat([z_t, action_t], dim=-1)
             h_t = self.rssm.recurrent(recurrent_input, h_t)
             prior_mean, _ = self.rssm._dist_params(self.rssm.prior(h_t))
             features_list.append(torch.cat([h_t, prior_mean], dim=-1))
             z_t = prior_mean
+        return torch.stack(features_list, dim=1)
 
-        imagined_features = torch.stack(features_list, dim=1)
-        imagined_reconstructions = self.decoder(imagined_features)
-        target_start = context_steps - 1
-        return imagined_reconstructions, imagined_features, target_start
+    def posterior_step(
+        self,
+        deter_prev: torch.Tensor,
+        stoch_prev: torch.Tensor,
+        action_prev: torch.Tensor,
+        observation: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Advance one posterior step: ``(h_{t-1}, z_{t-1}, action_{t-1}, obs_t) → (h_t, z_t_mean)``.
+
+        Used by the online MPC loop (and other rollout drivers) to drop the
+        next observation into the latent state without re-encoding the entire
+        history. Returns deterministic posterior mean (no sampling) for
+        reproducibility.
+        """
+
+        if observation.ndim == 3:
+            observation = observation.unsqueeze(0)
+        if observation.ndim != 4 or observation.shape[1] != self.input_channels:
+            raise ValueError(
+                f"observation must have shape [B, C={self.input_channels}, H, W]; "
+                f"got {tuple(observation.shape)}",
+            )
+        if action_prev.ndim != 2 or action_prev.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"action_prev must have shape [B, action_dim={self.action_dim}]; "
+                f"got {tuple(action_prev.shape)}",
+            )
+
+        recurrent_input = torch.cat([stoch_prev, action_prev], dim=-1)
+        h_t = self.rssm.recurrent(recurrent_input, deter_prev)
+        embedding = self.encoder(observation.unsqueeze(1)).squeeze(1)
+        posterior_input = torch.cat([h_t, embedding], dim=-1)
+        posterior_mean, _ = self.rssm._dist_params(self.rssm.posterior(posterior_input))
+        return h_t, posterior_mean
+
+    def initial_posterior(
+        self,
+        observation: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Initial posterior at the first observation, with zero deterministic state.
+
+        Mirrors the RSSM's ``t=0`` step: ``h_0 = 0``, ``q(z_0 | h_0, embed_0)``.
+        Returns ``(h_0, z_0_mean)`` shaped ``[B, hidden_size]``, ``[B, latent_size]``.
+        """
+
+        if observation.ndim == 3:
+            observation = observation.unsqueeze(0)
+        if observation.ndim != 4 or observation.shape[1] != self.input_channels:
+            raise ValueError(
+                f"observation must have shape [B, C={self.input_channels}, H, W]; "
+                f"got {tuple(observation.shape)}",
+            )
+        batch_size = observation.shape[0]
+        h_0 = observation.new_zeros(batch_size, self.hidden_size)
+        embedding = self.encoder(observation.unsqueeze(1)).squeeze(1)
+        posterior_input = torch.cat([h_0, embedding], dim=-1)
+        posterior_mean, _ = self.rssm._dist_params(self.rssm.posterior(posterior_input))
+        return h_0, posterior_mean
 
     def transition_aligned_next_prior_features(
         self,

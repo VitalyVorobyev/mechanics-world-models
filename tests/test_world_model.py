@@ -140,6 +140,10 @@ def test_world_model_loss_returns_finite_values() -> None:
         "kl_free_nats_active",
         "latent_consistency_loss",
         "weighted_latent_consistency_loss",
+        "reward_loss",
+        "weighted_reward_loss",
+        "imagined_reward_loss",
+        "weighted_imagined_reward_loss",
     }
     assert torch.allclose(losses["weighted_reconstruction_loss"], losses["reconstruction_loss"])
     assert torch.allclose(
@@ -890,6 +894,199 @@ def test_capture_and_restore_rng_state_round_trip() -> None:
     restore_rng_state(state)
     drawn_after = torch.randn(3)
     assert torch.equal(drawn_first, drawn_after)
+
+
+def test_reward_head_emits_per_step_predictions() -> None:
+    model = VisualWorldModel(
+        action_dim=2,
+        embedding_size=32,
+        hidden_size=16,
+        latent_size=8,
+        reward_head=True,
+    )
+    outputs = model(observations=_observations(), actions=_actions())
+
+    assert outputs.reward_predictions is not None
+    assert outputs.reward_predictions.shape == (2, 3)
+
+
+def test_reward_head_imagined_predictions_match_horizon() -> None:
+    model = VisualWorldModel(
+        action_dim=2,
+        embedding_size=32,
+        hidden_size=16,
+        latent_size=8,
+        reward_head=True,
+    )
+    obs = torch.rand(2, 10, 3, 84, 84)
+    next_obs = torch.rand(2, 10, 3, 84, 84)
+    actions = torch.rand(2, 10, 2)
+    outputs = model(
+        observations=obs,
+        actions=actions,
+        next_observations=next_obs,
+        imagination_context_steps=3,
+        imagination_horizon=5,
+    )
+
+    assert outputs.imagined_reward_predictions is not None
+    assert outputs.imagined_reward_predictions.shape == (2, 5)
+
+
+def test_reward_loss_targets_correct_reward_slice() -> None:
+    model = VisualWorldModel(
+        action_dim=2,
+        embedding_size=32,
+        hidden_size=16,
+        latent_size=8,
+        reward_head=True,
+    )
+    obs = torch.rand(2, 10, 3, 84, 84)
+    next_obs = torch.rand(2, 10, 3, 84, 84)
+    actions = torch.rand(2, 10, 2)
+    rewards = torch.rand(2, 10)
+    outputs = model(
+        observations=obs,
+        actions=actions,
+        next_observations=next_obs,
+        imagination_context_steps=3,
+        imagination_horizon=5,
+    )
+    losses = compute_world_model_loss(
+        outputs,
+        obs,
+        kl_weight=0.0,
+        reconstruction_weight=0.0,
+        reward_weight=1.0,
+        imagined_reward_weight=2.0,
+        rewards=rewards,
+        next_observations=next_obs,
+    )
+
+    expected_posterior = torch.nn.functional.mse_loss(outputs.reward_predictions, rewards)
+    expected_imagined = torch.nn.functional.mse_loss(
+        outputs.imagined_reward_predictions, rewards[:, 2:7]
+    )
+    assert torch.allclose(losses["reward_loss"], expected_posterior, atol=1e-6)
+    assert torch.allclose(losses["imagined_reward_loss"], expected_imagined, atol=1e-6)
+    assert torch.allclose(
+        losses["weighted_reward_loss"] + losses["weighted_imagined_reward_loss"],
+        losses["total_loss"],
+        atol=1e-6,
+    )
+
+
+def test_reward_loss_requires_reward_head() -> None:
+    model = VisualWorldModel(
+        action_dim=2, embedding_size=32, hidden_size=16, latent_size=8, reward_head=False,
+    )
+    outputs = model(observations=_observations(), actions=_actions())
+    with pytest.raises(ValueError, match="reward_head=True"):
+        compute_world_model_loss(
+            outputs,
+            _observations(),
+            kl_weight=0.0,
+            reward_weight=1.0,
+            rewards=torch.zeros(2, 3),
+        )
+
+
+def test_checkpoint_compat_without_to_with_reward_head(tmp_path: Path) -> None:
+    """Checkpoint trained without reward head loads into a model with reward head."""
+
+    config = TrainConfig(
+        dataset_dir=tmp_path / "data",
+        checkpoint_dir=tmp_path / "ckpt",
+        sequence_length=16,
+        hidden_size=16,
+        latent_size=8,
+        embedding_size=32,
+        reward_head=False,
+    )
+    config.checkpoint_dir.mkdir(parents=True)
+    plain_model = VisualWorldModel(
+        action_dim=2, embedding_size=32, hidden_size=16, latent_size=8, reward_head=False,
+    )
+    optimizer = torch.optim.AdamW(plain_model.parameters(), lr=3e-4)
+    scheduler = build_lr_scheduler(optimizer, warmup_steps=2, total_steps=10, schedule="cosine")
+    sum(p.sum() for p in plain_model.parameters()).backward()
+    optimizer.step()
+    scheduler.step()
+    saved = save_checkpoint(
+        checkpoint_dir=config.checkpoint_dir,
+        epoch=1,
+        model=plain_model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        metrics={"total_loss": 0.0},
+        global_step=1,
+        history_path=config.checkpoint_dir / "history.jsonl",
+    )
+
+    upgraded_model = VisualWorldModel(
+        action_dim=2, embedding_size=32, hidden_size=16, latent_size=8, reward_head=True,
+    )
+    upgraded_optimizer = torch.optim.AdamW(upgraded_model.parameters(), lr=3e-4)
+    upgraded_scheduler = build_lr_scheduler(
+        upgraded_optimizer, warmup_steps=2, total_steps=10, schedule="cosine",
+    )
+    # No expected_config so the reward_head config-flag drift is not compared.
+    epoch, step = load_checkpoint(
+        saved, upgraded_model, upgraded_optimizer, torch.device("cpu"), scheduler=upgraded_scheduler,
+    )
+    assert epoch == 1 and step == 1
+    # Reward head exists and was initialized fresh.
+    assert upgraded_model.reward_head is not None
+    out = upgraded_model(observations=_observations(), actions=_actions())
+    assert out.reward_predictions is not None and out.reward_predictions.shape == (2, 3)
+
+
+def test_checkpoint_compat_with_to_without_reward_head(tmp_path: Path) -> None:
+    """Checkpoint trained with reward head still loads into a plain model."""
+
+    config = TrainConfig(
+        dataset_dir=tmp_path / "data",
+        checkpoint_dir=tmp_path / "ckpt",
+        sequence_length=16,
+        hidden_size=16,
+        latent_size=8,
+        embedding_size=32,
+        reward_head=True,
+    )
+    config.checkpoint_dir.mkdir(parents=True)
+    full_model = VisualWorldModel(
+        action_dim=2, embedding_size=32, hidden_size=16, latent_size=8, reward_head=True,
+    )
+    optimizer = torch.optim.AdamW(full_model.parameters(), lr=3e-4)
+    scheduler = build_lr_scheduler(optimizer, warmup_steps=2, total_steps=10, schedule="cosine")
+    sum(p.sum() for p in full_model.parameters()).backward()
+    optimizer.step()
+    scheduler.step()
+    saved = save_checkpoint(
+        checkpoint_dir=config.checkpoint_dir,
+        epoch=1,
+        model=full_model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        metrics={"total_loss": 0.0},
+        global_step=1,
+        history_path=config.checkpoint_dir / "history.jsonl",
+    )
+
+    plain_model = VisualWorldModel(
+        action_dim=2, embedding_size=32, hidden_size=16, latent_size=8, reward_head=False,
+    )
+    plain_optimizer = torch.optim.AdamW(plain_model.parameters(), lr=3e-4)
+    plain_scheduler = build_lr_scheduler(
+        plain_optimizer, warmup_steps=2, total_steps=10, schedule="cosine",
+    )
+    epoch, step = load_checkpoint(
+        saved, plain_model, plain_optimizer, torch.device("cpu"), scheduler=plain_scheduler,
+    )
+    assert epoch == 1 and step == 1
+    assert plain_model.reward_head is None
 
 
 def test_constant_scheduler_reaches_peak_after_warmup() -> None:

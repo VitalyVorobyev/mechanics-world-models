@@ -52,6 +52,10 @@ class TrainConfig:
     foreground_imagination_reconstruction_weight: float = 0.0
     imagination_context_steps: int = 4
     imagination_horizon: int = 0
+    reward_head: bool = False
+    reward_head_hidden_size: int = 200
+    reward_weight: float = 0.0
+    imagined_reward_weight: float = 0.0
     dynamic_reconstruction_weight: float = 0.0
     dynamic_mask_floor: float = 0.05
     latent_consistency_weight: float = 0.0
@@ -174,6 +178,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "training sequence must satisfy T >= context_steps + horizon - 1."
         ),
     )
+    parser.add_argument(
+        "--reward-head",
+        action="store_true",
+        help=(
+            "Add a reward head MLP from RSSM features to scalar reward. Required "
+            "before MPC/CEM evaluation. Backward-compatible with checkpoints "
+            "trained without it (the new module is initialized fresh)."
+        ),
+    )
+    parser.add_argument(
+        "--reward-head-hidden-size",
+        type=int,
+        default=200,
+        help="Hidden size for the two-layer reward MLP. Only used with --reward-head.",
+    )
+    parser.add_argument(
+        "--reward-weight",
+        type=float,
+        default=0.0,
+        help="MSE weight for posterior reward predictions vs dataloader rewards.",
+    )
+    parser.add_argument(
+        "--imagined-reward-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "MSE weight for imagined (multi-step prior) reward predictions. Trains "
+            "the head over the same trajectory distribution MPC will roll out."
+        ),
+    )
     parser.add_argument("--dynamic-reconstruction-weight", type=float, default=0.0)
     parser.add_argument("--dynamic-mask-floor", type=float, default=0.05)
     parser.add_argument("--latent-consistency-weight", type=float, default=0.0)
@@ -274,6 +308,10 @@ def config_from_args(args: argparse.Namespace) -> TrainConfig:
         ),
         imagination_context_steps=args.imagination_context_steps,
         imagination_horizon=args.imagination_horizon,
+        reward_head=args.reward_head,
+        reward_head_hidden_size=args.reward_head_hidden_size,
+        reward_weight=args.reward_weight,
+        imagined_reward_weight=args.imagined_reward_weight,
         dynamic_reconstruction_weight=args.dynamic_reconstruction_weight,
         dynamic_mask_floor=args.dynamic_mask_floor,
         latent_consistency_weight=args.latent_consistency_weight,
@@ -328,10 +366,20 @@ def train(config: TrainConfig, console: Console | None = None) -> None:
     imagination_enabled = (
         config.imagination_reconstruction_weight > 0.0
         or config.foreground_imagination_reconstruction_weight > 0.0
+        or config.imagined_reward_weight > 0.0
     )
     if imagination_enabled and config.imagination_horizon < 1:
         raise ValueError(
-            "imagination_horizon must be >= 1 when any imagination weight > 0",
+            "imagination_horizon must be >= 1 when any imagination/imagined-reward "
+            "weight > 0",
+        )
+    if config.reward_weight > 0.0 and not config.reward_head:
+        raise ValueError(
+            "reward_weight > 0 requires --reward-head so the model has a head to train",
+        )
+    if config.imagined_reward_weight > 0.0 and not config.reward_head:
+        raise ValueError(
+            "imagined_reward_weight > 0 requires --reward-head",
         )
     if imagination_enabled and config.sequence_length < (
         config.imagination_context_steps + config.imagination_horizon - 1
@@ -403,6 +451,8 @@ def train(config: TrainConfig, console: Console | None = None) -> None:
         hidden_size=config.hidden_size,
         latent_size=config.latent_size,
         image_size=image_size,
+        reward_head=config.reward_head,
+        reward_head_hidden_size=config.reward_head_hidden_size,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -498,6 +548,8 @@ def train(config: TrainConfig, console: Console | None = None) -> None:
             ),
             imagination_context_steps=config.imagination_context_steps,
             imagination_horizon=config.imagination_horizon,
+            reward_weight=config.reward_weight,
+            imagined_reward_weight=config.imagined_reward_weight,
             reconstruction_weight=config.reconstruction_weight,
             foreground_reconstruction_weight=config.foreground_reconstruction_weight,
             foreground_mask_floor=config.foreground_mask_floor,
@@ -533,6 +585,8 @@ def train(config: TrainConfig, console: Console | None = None) -> None:
                 ),
                 imagination_context_steps=config.imagination_context_steps,
                 imagination_horizon=config.imagination_horizon,
+                reward_weight=config.reward_weight,
+                imagined_reward_weight=config.imagined_reward_weight,
                 reconstruction_weight=config.reconstruction_weight,
                 foreground_reconstruction_weight=config.foreground_reconstruction_weight,
                 foreground_mask_floor=config.foreground_mask_floor,
@@ -581,6 +635,8 @@ def run_epoch(
     foreground_imagination_reconstruction_weight: float,
     imagination_context_steps: int,
     imagination_horizon: int,
+    reward_weight: float,
+    imagined_reward_weight: float,
     reconstruction_weight: float,
     foreground_reconstruction_weight: float,
     foreground_mask_floor: float,
@@ -604,13 +660,16 @@ def run_epoch(
     num_batches = 0
     global_step = start_global_step
 
+    reward_enabled = reward_weight > 0.0 or imagined_reward_weight > 0.0
     imagination_enabled = (
         imagination_reconstruction_weight > 0.0
         or foreground_imagination_reconstruction_weight > 0.0
+        or imagined_reward_weight > 0.0
     )
     for batch in loader:
         observations = batch["observations"].to(device)
         actions = batch["actions"].to(device)
+        rewards = batch["rewards"].to(device) if reward_enabled else None
         needs_transition_outputs = (
             latent_consistency_weight > 0.0
             or transition_reconstruction_weight > 0.0
@@ -659,6 +718,9 @@ def run_epoch(
             dynamic_reconstruction_weight=dynamic_reconstruction_weight,
             dynamic_mask_floor=dynamic_mask_floor,
             latent_consistency_weight=latent_consistency_weight,
+            reward_weight=reward_weight,
+            imagined_reward_weight=imagined_reward_weight,
+            rewards=rewards,
             next_observations=next_observations,
         )
 
@@ -710,6 +772,8 @@ def evaluate(
     foreground_imagination_reconstruction_weight: float,
     imagination_context_steps: int,
     imagination_horizon: int,
+    reward_weight: float,
+    imagined_reward_weight: float,
     reconstruction_weight: float,
     foreground_reconstruction_weight: float,
     foreground_mask_floor: float,
@@ -725,13 +789,16 @@ def evaluate(
     model.eval()
     totals: dict[str, float] = {}
     num_batches = 0
+    reward_enabled = reward_weight > 0.0 or imagined_reward_weight > 0.0
     imagination_enabled = (
         imagination_reconstruction_weight > 0.0
         or foreground_imagination_reconstruction_weight > 0.0
+        or imagined_reward_weight > 0.0
     )
     for batch in loader:
         observations = batch["observations"].to(device)
         actions = batch["actions"].to(device)
+        rewards = batch["rewards"].to(device) if reward_enabled else None
         needs_transition_outputs = (
             latent_consistency_weight > 0.0
             or transition_reconstruction_weight > 0.0
@@ -740,7 +807,8 @@ def evaluate(
         needs_next_observations = (
             needs_transition_outputs
             or dynamic_reconstruction_weight > 0.0
-            or imagination_enabled
+            or imagination_reconstruction_weight > 0.0
+            or foreground_imagination_reconstruction_weight > 0.0
         )
         next_observations = (
             batch["next_observations"].to(device)
@@ -775,6 +843,9 @@ def evaluate(
             dynamic_reconstruction_weight=dynamic_reconstruction_weight,
             dynamic_mask_floor=dynamic_mask_floor,
             latent_consistency_weight=latent_consistency_weight,
+            reward_weight=reward_weight,
+            imagined_reward_weight=imagined_reward_weight,
+            rewards=rewards,
             next_observations=next_observations,
         )
         update_totals(totals, tensor_metrics_to_float(losses))
@@ -866,16 +937,40 @@ def load_checkpoint(
     if expected_config is not None and "config" in checkpoint:
         validate_resume_config(checkpoint["config"], expected_config)
     missing, unexpected = model.load_state_dict(checkpoint["model_state"], strict=False)
-    allowed_missing = [name for name in missing if name.startswith("latent_predictor.")]
-    disallowed_missing = [name for name in missing if not name.startswith("latent_predictor.")]
-    if disallowed_missing or unexpected:
+    # Modules added in later phases are allowed to be missing from older
+    # checkpoints; we just initialize them from defaults and warn. Add new
+    # prefixes here as new optional submodules land.
+    OPTIONAL_NEW_MODULE_PREFIXES = ("latent_predictor.", "reward_head.")
+    allowed_missing = [
+        name
+        for name in missing
+        if any(name.startswith(prefix) for prefix in OPTIONAL_NEW_MODULE_PREFIXES)
+    ]
+    disallowed_missing = [
+        name
+        for name in missing
+        if not any(name.startswith(prefix) for prefix in OPTIONAL_NEW_MODULE_PREFIXES)
+    ]
+    unexpected_disallowed = [
+        name
+        for name in unexpected
+        if not any(name.startswith(prefix) for prefix in OPTIONAL_NEW_MODULE_PREFIXES)
+    ]
+    if disallowed_missing or unexpected_disallowed:
         raise RuntimeError(
-            f"checkpoint model state mismatch: missing={disallowed_missing}, unexpected={unexpected}",
+            "checkpoint model state mismatch: "
+            f"missing={disallowed_missing}, unexpected={unexpected_disallowed}",
         )
     if allowed_missing:
         print(
-            "Warning: checkpoint is missing latent_predictor parameters; "
+            f"Warning: checkpoint is missing optional parameters {allowed_missing}; "
             "initialized them from the current model defaults.",
+        )
+    if [name for name in unexpected if name not in unexpected_disallowed]:
+        print(
+            "Warning: checkpoint contains optional parameters that the current "
+            "model does not use; ignoring them. To use them, enable the "
+            "corresponding flag (e.g. --reward-head).",
         )
     try:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
@@ -888,7 +983,7 @@ def load_checkpoint(
         else:
             print(
                 "Warning: checkpoint optimizer state is incompatible with the "
-                "new latent_predictor parameters; using a fresh optimizer state.",
+                "new optional submodules; using a fresh optimizer state.",
             )
     if scheduler is not None and "scheduler_state" in checkpoint:
         scheduler.load_state_dict(checkpoint["scheduler_state"])
