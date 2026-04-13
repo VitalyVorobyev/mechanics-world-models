@@ -1,16 +1,26 @@
 .venv/bin/train-rssm \
-  --dataset-dir data/cartpole-swingup-random-100k \
-  --checkpoint-dir checkpoints/rssm-cartpole-aligned-fg20-kl1e5-latent001 \
-  --sequence-length 32 \
-  --batch-size 32 \
-  --learning-rate 3e-4 \
-  --epochs 1 \
-  --kl-weight 1e-5 \
-  --reconstruction-weight 0.0 \
-  --foreground-reconstruction-weight 20.0 \
-  --foreground-mask-floor 0.02 \
-  --foreground-mask-kernel-size 7 \
-  --dynamic-reconstruction-weight 0.0 \
-  --latent-consistency-weight 0.01 \
-  --device auto \
-  --log-every-steps 100
+    --dataset-dir data/cartpole-swingup-random-100k \
+    --checkpoint-dir checkpoints/rssm-phase0 \
+    --auto-resume \
+    --sequence-length 32 \
+    --batch-size 32 \
+    --epochs 20 \
+    --learning-rate 3e-4 \
+    --warmup-steps 1000 \
+    --lr-schedule cosine \
+    --kl-weight 1.0 \
+    --kl-balance-alpha 0.8 \
+    --kl-free-nats 3.0 \
+    --reconstruction-weight 0.0 \
+    --foreground-reconstruction-weight 2.0 \
+    --foreground-mask-floor 0.02 \
+    --foreground-mask-kernel-size 7 \
+    --imagination-context-steps 4 \
+    --imagination-horizon 12 \
+    --foreground-imagination-reconstruction-weight 2.0 \
+    --val-open-loop-every-steps 500 \
+    --val-open-loop-warmup 4 \
+    --val-open-loop-horizons "1,5,10,20" \
+    --val-open-loop-sequences 32 \
+    --device auto \
+    --log-every-steps 100

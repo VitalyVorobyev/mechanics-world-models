@@ -16,7 +16,8 @@ The current baseline includes:
 - a PyTorch sequence dataset that returns `observations`, `next_observations`,
   `actions`, `rewards`, and `dones`
 - a compact RSSM-style visual world model with encoder, RSSM transition,
-  decoder, and optional latent consistency head
+  decoder, optional latent consistency head, and optional transition
+  reconstruction path
 - an offline trainer with checkpoints, JSONL history, rich terminal logging, and
   loss plotting
 - evaluation utilities for posterior reconstruction, one-step prediction, and
@@ -49,7 +50,7 @@ observed behavior:
 - dynamic reconstruction masks were not ideal because they often emphasized a
   right-edge/background artifact rather than the cartpole
 
-The latest experiments changed that picture. A strong foreground reconstruction
+Recent experiments changed that picture. A strong foreground reconstruction
 stress run with `foreground_reconstruction_weight=20`, `reconstruction_weight=0`,
 and very small KL fixed posterior reconstruction: qualitative reconstructions are
 sharp, and reconstruction MSE is around `3e-4`. Adding `kl_weight=1e-5` and
@@ -72,9 +73,9 @@ features for `obs_{t+1}`. The latent predictor can reduce cosine loss through
 its own MLP without forcing `decoder(next_prior_features)` to produce a sharp
 cartpole frame.
 
-## Next Investigation
+## Current Diagnostic Patch
 
-The next patch adds an explicit transition reconstruction diagnostic/objective:
+The code now includes an explicit transition reconstruction diagnostic/objective:
 
 - posterior reconstruction at index `t` still targets `obs_t`
 - transition reconstruction at index `t` decodes the prior feature after
@@ -84,10 +85,18 @@ The next patch adds an explicit transition reconstruction diagnostic/objective:
 - scalar eval should continue to include foreground-masked prediction MSE,
   because full-frame MSE hides foreground failure
 
-Only after that alignment check should we move to a reconstruction-free or
-target-encoder latent baseline. The current evidence says latent prediction alone
-is not the next clean move, because decoded transition-prior features are still
-undertrained.
+This patch is implemented but still needs a real training/evaluation run before
+we know whether it fixes open-loop drift. The most direct next experiment is to
+keep the working posterior foreground objective and add the new foreground
+transition objective, for example with `foreground_reconstruction_weight=20`,
+`foreground_transition_reconstruction_weight=20`, `reconstruction_weight=0`,
+`transition_reconstruction_weight=0`, very small KL such as `1e-5`, and
+`latent_consistency_weight=0`.
+
+Only after that transition-prior check should we move to a reconstruction-free
+or target-encoder latent baseline. The current evidence says latent prediction
+alone is not the next clean move, because decoded transition-prior features are
+still undertrained.
 
 ## What This Means for the Research Plan
 

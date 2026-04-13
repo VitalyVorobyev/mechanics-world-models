@@ -22,9 +22,28 @@ class RSSMOutput:
 
     @property
     def features(self) -> torch.Tensor:
-        """Concatenate deterministic and stochastic states as ``[B, T, H + Z]``."""
+        """Concatenate deterministic and sampled stochastic states as ``[B, T, H + Z]``.
+
+        Uses the reparameterized sample ``z_t``. Prefer ``features_posterior_mean``
+        for decoder and reward-head inputs during training so that the decoded
+        distribution matches the deterministic mean-based rollout used at eval
+        time (eliminates the train/eval mean-vs-sample mismatch that otherwise
+        leaves the decoder under-trained for the exact features fed into it at
+        evaluation).
+        """
 
         return torch.cat([self.deter_states, self.latents], dim=-1)
+
+    @property
+    def features_posterior_mean(self) -> torch.Tensor:
+        """Concatenate deterministic and posterior-mean states as ``[B, T, H + Z]``.
+
+        Used as the decoder input during training so that the decoder is trained
+        on the same posterior representation (``h_t``, ``posterior_mean_t``) that
+        evaluation uses for reconstruction.
+        """
+
+        return torch.cat([self.deter_states, self.posterior_mean], dim=-1)
 
 
 class RSSM(nn.Module):

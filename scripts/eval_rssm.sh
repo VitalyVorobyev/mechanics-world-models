@@ -1,7 +1,7 @@
 .venv/bin/eval-rssm \
-  --checkpoint-path checkpoints/rssm-cartpole-aligned-fg20-kl1e5-latent001/latest.pt \
+  --checkpoint-path checkpoints/rssm-phase0/epoch_0003.pt \
   --dataset-dir data/cartpole-swingup-random-100k \
-  --output-dir eval/rssm-cartpole-aligned-fg20-kl1e5-latent001 \
+  --output-dir eval/rssm-phase0 \
   --sequence-length 32 \
   --warmup-length 5 \
   --horizons 1 5 10
