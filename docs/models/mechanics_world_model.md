@@ -19,6 +19,136 @@ The model exists alongside the
 the same dataset and budget it answers the K1/K2 acceptance gates from the
 research spec.
 
+## What The Model Learns
+
+The bet this model is making is that natural dynamical systems have a
+lot of structure the unstructured RSSM has to discover from scratch.
+Specifically: real mechanical systems are governed by a Lagrangian
+`L(q, qdot) = T(q, qdot) − V(q)` with a quadratic-in-qdot kinetic
+energy, possibly a Rayleigh dissipation `D(qdot)`, and a linear-in-u
+actuation channel `B(q) u`. If the world model is forced to obey this
+template then the encoder has a strong incentive to map pixels to
+something resembling **generalized coordinates** — position-like
+variables `q` whose time derivative is velocity-like `qdot` and whose
+evolution is governed by physics.
+
+The latent is split into three pieces, each with a different role:
+
+- **`q` (generalized coordinate, dim `d = 2` on cartpole).** Meant to
+  track the physically relevant *pose*: for cartpole that is cart
+  position and pole angle, though the model is free to use any smooth
+  linear reparameterization of these. The only things that constrain
+  `q` are (a) its finite difference must match `qdot` and (b) the
+  Lagrangian step starting from `q_t` must predict `q_{t+1}`.
+- **`qdot` (generalized velocity, dim `d`).** Meant to be the time
+  derivative of `q`. The smoothness prior is what actually enforces
+  this — without it there is no reason the encoder would put velocity
+  into `qdot` rather than dumping it into the nuisance channel.
+- **`z` (nuisance, dim `k = 32`).** Meant to absorb everything the
+  mechanics branch does not need to predict the future: appearance,
+  lighting, background texture, camera pose, distractor patterns.
+  Evolves under a simple AR(1) so it persists but is not expected to
+  be forecast from physics.
+
+Each of the four Lagrangian primitives is small (a two-layer MLP) and
+has a specific physical role the model is being pushed to learn:
+
+- **`M(q)`**: the generalized mass / inertia matrix. For a true
+  cartpole the exact form involves `m_pole * L * cos(pole_angle)`
+  cross-terms — the model is not told this, but a successful `M(q)`
+  will exhibit coupling between cart and pole coordinates and will
+  vary smoothly with `q`.
+- **`V(q)`**: the potential energy landscape. For cartpole this is
+  roughly `m * g * L * cos(pole_angle)` (peaked when the pole is
+  upright). A trained `V(q)` should show this peak — it is one of the
+  easiest sanity checks once a run finishes.
+- **`D(qdot)`**: Rayleigh dissipation, PSD by construction. The
+  gradient `∂D/∂qdot` is the generalized friction force, monotone in
+  `qdot`. For cartpole this should be small and mostly diagonal. If
+  the model can match B1's prediction quality with `D = 0` (the
+  `--no-dissipation` ablation), H3 is falsified on this environment.
+- **`B(q)`**: actuation map. Cartpole has a single motor that pushes
+  the cart, so the physically correct `B(q)` is roughly `[1, 0]` (force
+  on the cart coordinate, none on the pole). A learned `B(q)` that
+  matches this up to the sign and scale of the coordinate
+  reparameterization is a confirmation the factorization worked.
+
+Once those four pieces are in place, the forward step is completely
+standard physics: solve `M(q) q̈ = ∂L/∂q − Ṁ q̇ − ∂D/∂qdot + B(q) u`
+for `q̈`, then advance `(q, qdot)` with a semi-implicit symplectic
+step. The nuisance channel updates as `z_{t+1} = α * z_t` with `α`
+learnable in `(0, 1)`. The decoder takes `concat(q, qdot, z)` and
+produces an image.
+
+Compared to the RSSM, nearly every choice in this model is a
+commitment: the mass matrix is PD, the integrator is symplectic, the
+KL budget is tighter on the mechanics branch than on the nuisance
+branch, the smoothness prior ties the two encoder heads into a
+derivative relationship. Any one of these commitments could be wrong
+for a given environment — the ablations (B2 no-dissipation, B3 no
+q/z split) exist exactly to probe this.
+
+## Physical Intuition For The Primitives
+
+A useful way to read a trained checkpoint is to freeze the encoder,
+pick a grid of `q` values, and visualize the four primitives. What you
+should expect on cartpole once K1 and K2 are met:
+
+| Quantity | Expected shape on cartpole |
+| --- | --- |
+| `V(q)` | Single maximum near the upright-pole configuration; roughly sinusoidal in the pole-angle coordinate; weak dependence on cart position. |
+| `M(q)` | Symmetric PD, with off-diagonal entries that vary smoothly with `q`. Diagonal entries are roughly the effective cart and pole inertias. |
+| `D(qdot)` | Small PSD matrix, near-diagonal, gradient roughly linear in `qdot`. Should essentially vanish if the environment is frictionless. |
+| `B(q)` | Weight concentrated on the cart coordinate's row; weakly dependent on `q`. |
+
+Conservation checks (via `compute_learned_energy` in
+`src/eval/probes.py`) are the other side of the same coin. For a
+frictionless rollout `E_learned(t) = T + V` should be nearly constant
+over 50+ steps; with the learned `D` engaged it should be monotone
+non-increasing on average. This is metric (4) from the research spec
+and it is what H3 hinges on.
+
+## Interpreting Inputs And Outputs
+
+**Observations and actions.** Identical contract to the RSSM baseline.
+Same encoder trunk.
+
+**Latent factors.** `q`, `qdot`, and `z` live in separate tensors, and
+unlike the RSSM's `[h, z]` the individual coordinates are meant to have
+real meaning:
+
+- `q_t` can be linearly regressed onto the simulator's `qpos` to
+  recover a diagnostic R² (the K2 gate, `fit_linear_probe` in
+  `src/eval/probes.py`). Values of R² close to 1 mean the encoder
+  found generalized coordinates up to a linear reparameterization.
+- `qdot_t` should approximately equal `(q_{t+1} − q_t) / dt`. The
+  smoothness loss reports exactly this residual.
+- `z_t` is not expected to be interpretable. It should, however, vary
+  slowly (`α ≈ 0.95`) and not carry any information the mechanics
+  branch needs.
+
+**Reconstructions.** Three modes, parallel to the RSSM:
+
+- *Posterior*: encode each frame, decode `concat(q, qdot, z)`. Expected
+  to be sharp almost immediately — the decoder does not depend on the
+  dynamics quality.
+- *One-step prior*: take the posterior at `t`, run one integrator step,
+  decode. Targets `obs_{t+1}`. This is the first place bad dynamics
+  show up: cart leaves a trail, pole falls the wrong way, etc.
+- *Open-loop imagination*: take `K_ctx` posterior steps to pin down
+  `(q, qdot, z)`, then roll the integrator forward `K_imag` steps
+  without observations and decode every step. Errors compound. This
+  is where we expect structured models to beat the RSSM — the prior
+  should stay on the manifold of physically plausible configurations
+  for much longer.
+
+**CEM / online MPC.** `initial_posterior` and `posterior_step` return
+`(q, qdot, z)` from a single frame; `imagine_rollout_features` rolls
+forward under a candidate action sequence and returns decoded features
+suitable for the reward head. The planner does not know or need to
+know that the latent is factored — it just sees a dense feature tensor
+and a reward head.
+
 ## Architecture and Parameters
 
 Implementation entry point:
@@ -196,6 +326,56 @@ mis-loading state.
   potential. With `D = 0` this should be approximately conserved over open-
   loop rollouts; with `D > 0` it should be monotone-non-increasing on
   average. Used for H3.
+
+## Signals And Failure Modes
+
+Healthy training looks like the RSSM signals plus a few mechanics-
+specific ones:
+
+- **`val_open_loop_fg_mse_h10`** ≤ the B1 value by epoch 6–8 is the K1
+  gate for this model. If it stays far above B1 while posterior
+  reconstruction is good, the Lagrangian is not fitting the data — the
+  structural bias is too strong for this environment or too weak
+  (not enough MLP capacity in `M, V, D, B`).
+- **`smoothness_loss`** dropping toward a small value means the encoder
+  has actually learned to make `qdot` the finite difference of `q`. If
+  it plateaus high, the two mechanics heads are drifting apart and
+  the linear probe will not work.
+- **`kl_q_raw`, `kl_qdot_raw`, `kl_z_raw`**: the three balanced KL
+  branches. We expect the mechanics branches to be *small* in nats
+  (the integrator prior is close to the posterior by design) and the
+  nuisance branch to be larger. The `kl_*_free_nats_active` flags tell
+  you whether the respective floor is binding — for the mechanics
+  branches it usually is early in training and should lift later.
+- **`nuisance_alpha`**: the learned AR(1) coefficient. Should move
+  toward 1 as training progresses if `z` is carrying slowly-varying
+  appearance, and toward 0 if it is not learning to persist anything.
+
+Typical failure modes unique to this model:
+
+- *Factorization collapse*. All useful information ends up in `z`; `q`
+  and `qdot` become near-constants. Symptoms: linear probe R² ≈ 0,
+  smoothness loss is tiny (both sides are ~0), open-loop prediction
+  works but is driven entirely by `z`'s AR(1). Mitigation: increase
+  `smoothness_weight`, lower `kl_free_nats_nuisance`, shrink the
+  nuisance dim.
+- *Rigid mechanics*. `q` tracks something reasonable but `M(q)` /
+  `V(q)` are nearly constant, so the integrator step degenerates to a
+  free-particle update. Symptoms: open-loop at short horizons is
+  fine, but long horizons diverge. Mitigation: increase dynamics MLP
+  capacity or widen the training horizon.
+- *Energy blow-up*. On a frictionless rollout, learned energy grows
+  without bound. This is the symptom the symplectic integrator was
+  chosen to avoid; if it still happens it usually means `dt` is too
+  large for the effective stiffness of the learned `M, V`. Mitigation:
+  increase `n_substeps` or shrink `dt`.
+- *Dissipation eats everything*. `D` becomes very large early; the
+  model uses it to suppress its own predictions and then the
+  integrator rolls every state toward the fixed point of the
+  potential. Symptoms: everything decays to a canonical pose.
+  Mitigation: start `Dissipation.net[-1].bias` near zero (its default
+  initialization does this) and/or use `--no-dissipation` as a
+  sanity-check ablation.
 
 ## Relation to Other Models
 
