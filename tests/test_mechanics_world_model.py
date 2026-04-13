@@ -127,6 +127,60 @@ def test_state_dict_captures_dynamics_parameters() -> None:
         assert any(p == prefix for p in present), f"missing {prefix} in state_dict"
 
 
+def test_batched_rollout_matches_sequential_reference() -> None:
+    """Tier-A regression: the batched ``_rollout`` must match a step-by-step loop.
+
+    The forward path's per-step prior at ``t`` depends only on the posterior
+    sample at ``t-1`` and ``action_{t-1}``. The implementation now flattens
+    these inputs into a ``B*(T-1)`` batch and runs a single ``transition.step``
+    call instead of looping in Python. This test takes the posterior samples
+    that ``_rollout`` actually produced and re-runs them through a sequential
+    reference loop, asserting all six prior tensors match exactly.
+    """
+
+    torch.manual_seed(20260413)
+    model = _make_model()
+    obs = torch.rand(3, 6, 3, 84, 84)
+    actions = torch.randn(3, 6, 1)
+    posterior = model.encoder(obs)
+    rollout = model._rollout(posterior=posterior, actions=actions)
+
+    q_samples = rollout.q_sampled
+    qdot_samples = rollout.qdot_sampled
+    z_samples = rollout.z_sampled
+    initial = model.transition.initial_prior(
+        batch_size=q_samples.shape[0],
+        device=q_samples.device,
+        dtype=q_samples.dtype,
+    )
+    expected_q_means = [initial.q_mean]
+    expected_q_stds = [initial.q_std]
+    expected_qdot_means = [initial.qdot_mean]
+    expected_qdot_stds = [initial.qdot_std]
+    expected_z_means = [initial.z_mean]
+    expected_z_stds = [initial.z_std]
+    for step in range(1, q_samples.shape[1]):
+        prior = model.transition.step(
+            q_prev=q_samples[:, step - 1],
+            qdot_prev=qdot_samples[:, step - 1],
+            z_prev=z_samples[:, step - 1],
+            action=actions[:, step - 1],
+        )
+        expected_q_means.append(prior.q_mean)
+        expected_q_stds.append(prior.q_std)
+        expected_qdot_means.append(prior.qdot_mean)
+        expected_qdot_stds.append(prior.qdot_std)
+        expected_z_means.append(prior.z_mean)
+        expected_z_stds.append(prior.z_std)
+
+    torch.testing.assert_close(rollout.prior_q_mean, torch.stack(expected_q_means, dim=1))
+    torch.testing.assert_close(rollout.prior_q_std, torch.stack(expected_q_stds, dim=1))
+    torch.testing.assert_close(rollout.prior_qdot_mean, torch.stack(expected_qdot_means, dim=1))
+    torch.testing.assert_close(rollout.prior_qdot_std, torch.stack(expected_qdot_stds, dim=1))
+    torch.testing.assert_close(rollout.prior_z_mean, torch.stack(expected_z_means, dim=1))
+    torch.testing.assert_close(rollout.prior_z_std, torch.stack(expected_z_stds, dim=1))
+
+
 def test_no_dissipation_drops_dissipation_module() -> None:
     model = _make_model(with_dissipation=False)
     assert not hasattr(model, "dissipation_module")

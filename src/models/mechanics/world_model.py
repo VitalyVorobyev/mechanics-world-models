@@ -263,67 +263,93 @@ class MechanicsWorldModel(nn.Module):
     ) -> MechanicsRollout:
         """Run the posterior rollout, sampling at each step and running priors.
 
-        Priors are conditioned on the posterior *sample* at ``t-1``; this keeps
-        the KL term reparameterized and matches standard RSSM practice.
+        The prior at step ``t`` depends on the posterior sample at ``t-1`` and
+        ``action_{t-1}`` only, so the ``T-1`` integrator calls for ``t=1..T-1``
+        are mutually independent. We exploit this by drawing all posterior
+        samples up front and then calling ``self.transition.step`` once on a
+        flattened batch of size ``B * (T-1)`` instead of looping ``T-1`` times
+        in Python — same outputs and gradients, dramatically fewer kernel
+        launches on the dynamics path. Imagination cannot be batched this way
+        (each imagined step truly depends on the previous step's state) so the
+        sequential loop lives only in ``imagine_from_posterior``.
         """
 
         batch_size, sequence_length = posterior.q_mean.shape[:2]
         device = posterior.q_mean.device
         dtype = posterior.q_mean.dtype
 
-        prior_q_means: list[torch.Tensor] = []
-        prior_q_stds: list[torch.Tensor] = []
-        prior_qdot_means: list[torch.Tensor] = []
-        prior_qdot_stds: list[torch.Tensor] = []
-        prior_z_means: list[torch.Tensor] = []
-        prior_z_stds: list[torch.Tensor] = []
-        q_samples: list[torch.Tensor] = []
-        qdot_samples: list[torch.Tensor] = []
-        z_samples: list[torch.Tensor] = []
+        # Reparameterized samples drawn once across the whole sequence; the
+        # randomness pattern differs from the prior-step-then-sample loop, but
+        # only the order of consumed RNG draws changes — distributionally each
+        # sample is identical to before.
+        q_samples = _sample_normal(posterior.q_mean, posterior.q_std)
+        qdot_samples = _sample_normal(posterior.qdot_mean, posterior.qdot_std)
+        z_samples = _sample_normal(posterior.z_mean, posterior.z_std)
 
+        # ``initial`` (t=0) is a fixed unit-Gaussian prior with no history.
         initial = self.transition.initial_prior(batch_size, device=device, dtype=dtype)
-        prev_q: torch.Tensor | None = None
-        prev_qdot: torch.Tensor | None = None
-        prev_z: torch.Tensor | None = None
 
-        for step in range(sequence_length):
-            if step == 0:
-                prior = initial
-            else:
-                assert prev_q is not None and prev_qdot is not None and prev_z is not None
-                prior = self.transition.step(
-                    q_prev=prev_q,
-                    qdot_prev=prev_qdot,
-                    z_prev=prev_z,
-                    action=actions[:, step - 1],
-                )
-            prior_q_means.append(prior.q_mean)
-            prior_q_stds.append(prior.q_std)
-            prior_qdot_means.append(prior.qdot_mean)
-            prior_qdot_stds.append(prior.qdot_std)
-            prior_z_means.append(prior.z_mean)
-            prior_z_stds.append(prior.z_std)
+        if sequence_length == 1:
+            return MechanicsRollout(
+                posterior=posterior,
+                prior_q_mean=initial.q_mean.unsqueeze(1),
+                prior_q_std=initial.q_std.unsqueeze(1),
+                prior_qdot_mean=initial.qdot_mean.unsqueeze(1),
+                prior_qdot_std=initial.qdot_std.unsqueeze(1),
+                prior_z_mean=initial.z_mean.unsqueeze(1),
+                prior_z_std=initial.z_std.unsqueeze(1),
+                q_sampled=q_samples,
+                qdot_sampled=qdot_samples,
+                z_sampled=z_samples,
+            )
 
-            q_t = _sample_normal(posterior.q_mean[:, step], posterior.q_std[:, step])
-            qdot_t = _sample_normal(posterior.qdot_mean[:, step], posterior.qdot_std[:, step])
-            z_t = _sample_normal(posterior.z_mean[:, step], posterior.z_std[:, step])
-            q_samples.append(q_t)
-            qdot_samples.append(qdot_t)
-            z_samples.append(z_t)
+        # Batched integrator for t=1..T-1. Each (b, t) entry is independent.
+        flat_batch = batch_size * (sequence_length - 1)
+        prev_q_flat = q_samples[:, :-1].reshape(flat_batch, q_samples.shape[-1])
+        prev_qdot_flat = qdot_samples[:, :-1].reshape(flat_batch, qdot_samples.shape[-1])
+        prev_z_flat = z_samples[:, :-1].reshape(flat_batch, z_samples.shape[-1])
+        actions_flat = actions[:, :-1].reshape(flat_batch, actions.shape[-1])
 
-            prev_q, prev_qdot, prev_z = q_t, qdot_t, z_t
+        prior_flat = self.transition.step(
+            q_prev=prev_q_flat,
+            qdot_prev=prev_qdot_flat,
+            z_prev=prev_z_flat,
+            action=actions_flat,
+        )
+
+        def _unflatten(tensor: torch.Tensor) -> torch.Tensor:
+            return tensor.reshape(batch_size, sequence_length - 1, tensor.shape[-1])
+
+        prior_q_mean = torch.cat(
+            [initial.q_mean.unsqueeze(1), _unflatten(prior_flat.q_mean)], dim=1,
+        )
+        prior_q_std = torch.cat(
+            [initial.q_std.unsqueeze(1), _unflatten(prior_flat.q_std)], dim=1,
+        )
+        prior_qdot_mean = torch.cat(
+            [initial.qdot_mean.unsqueeze(1), _unflatten(prior_flat.qdot_mean)], dim=1,
+        )
+        prior_qdot_std = torch.cat(
+            [initial.qdot_std.unsqueeze(1), _unflatten(prior_flat.qdot_std)], dim=1,
+        )
+        prior_z_mean = torch.cat(
+            [initial.z_mean.unsqueeze(1), _unflatten(prior_flat.z_mean)], dim=1,
+        )
+        prior_z_std = torch.cat(
+            [initial.z_std.unsqueeze(1), _unflatten(prior_flat.z_std)], dim=1,
+        )
 
         return MechanicsRollout(
             posterior=posterior,
-            prior_q_mean=torch.stack(prior_q_means, dim=1),
-            prior_q_std=torch.stack(prior_q_stds, dim=1),
-            prior_qdot_mean=torch.stack(prior_qdot_means, dim=1),
-            prior_qdot_std=torch.stack(prior_qdot_stds, dim=1),
-            prior_z_mean=torch.stack(prior_z_means, dim=1),
-            prior_z_std=torch.stack(prior_z_stds, dim=1),
-            q_sampled=torch.stack(q_samples, dim=1),
-            qdot_sampled=torch.stack(qdot_samples, dim=1),
-            z_sampled=torch.stack(z_samples, dim=1),
+            prior_q_mean=prior_q_mean,
+            prior_q_std=prior_q_std,
+            prior_qdot_mean=prior_qdot_mean,
+            prior_qdot_std=prior_qdot_std,
+            prior_z_mean=prior_z_mean,
+            prior_z_std=prior_z_std,
+            q_sampled=q_samples,
+            qdot_sampled=qdot_samples,
+            z_sampled=z_samples,
         )
 
     def imagine_from_posterior(

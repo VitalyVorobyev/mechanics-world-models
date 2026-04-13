@@ -726,9 +726,14 @@ def run_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         losses["total_loss"].backward()
-        grad_norm = compute_grad_norm(model)
+        # ``clip_grad_norm_`` returns the same total norm we'd report otherwise,
+        # so calling ``compute_grad_norm`` first would be a wasted host-device
+        # sync per step. Only fall back to the standalone helper when clipping
+        # is disabled.
         if grad_clip > 0.0:
             grad_norm = float(nn.utils.clip_grad_norm_(model.parameters(), grad_clip))
+        else:
+            grad_norm = compute_grad_norm(model)
         optimizer.step()
         scheduler.step()
 
@@ -1341,15 +1346,35 @@ def print_run_summary(
 
 
 def compute_grad_norm(model: nn.Module) -> float:
-    """Compute the global gradient norm before optional clipping."""
+    """Compute the global gradient L2 norm with a single host-device sync.
 
-    squared_norm = 0.0
-    for parameter in model.parameters():
-        if parameter.grad is None:
-            continue
-        grad_norm = parameter.grad.detach().data.norm(2)
-        squared_norm += float(grad_norm.item() ** 2)
-    return squared_norm**0.5
+    The previous implementation called ``.item()`` once per parameter, which
+    on MPS forces a pipeline flush per call — dozens of stalls per training
+    step for a model with ~80 grad-bearing parameters. We now compute the
+    per-parameter norms via a fused kernel (``torch._foreach_norm`` when
+    available, falling back to ``torch.stack``) and only call ``.item()``
+    once at the very end.
+
+    For convenience, prefer ``torch.nn.utils.clip_grad_norm_`` whenever
+    ``grad_clip > 0`` — its return value is the same total norm and it
+    is computed in the same fused kernel as the clip itself, so there is
+    no reason to call this function separately in that case.
+    """
+
+    grads = [
+        parameter.grad
+        for parameter in model.parameters()
+        if parameter.grad is not None
+    ]
+    if not grads:
+        return 0.0
+    foreach_norm = getattr(torch, "_foreach_norm", None)
+    if foreach_norm is not None:
+        per_param_norms = foreach_norm(grads, 2.0)
+    else:
+        per_param_norms = [g.detach().norm(2) for g in grads]
+    total = torch.linalg.vector_norm(torch.stack(per_param_norms))
+    return float(total.item())
 
 
 def resolve_device(device_name: str) -> torch.device:

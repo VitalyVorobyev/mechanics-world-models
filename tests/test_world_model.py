@@ -1168,3 +1168,46 @@ def test_kl_balancing_detach_semantics() -> None:
     )
     assert prior_mean.grad is not None and prior_mean.grad.abs().sum() > 0.0
     assert prior_std.grad is not None and prior_std.grad.abs().sum() > 0.0
+
+
+def test_compute_grad_norm_matches_reference_loop() -> None:
+    """``compute_grad_norm`` must match a naive per-parameter sum-of-squares loop.
+
+    Pins the Tier-B refactor: the fused-norm path (single ``.item()`` sync)
+    must produce numerically the same scalar as the previous per-parameter
+    ``.item()`` loop. Without this test, a future "optimization" could swap
+    in a different reduction (e.g. infinity norm) and silently change the
+    metric reported in ``history.jsonl``.
+    """
+
+    from train.train_rssm import compute_grad_norm
+
+    torch.manual_seed(7)
+    module = torch.nn.Sequential(
+        torch.nn.Linear(8, 16),
+        torch.nn.ReLU(),
+        torch.nn.Linear(16, 4),
+    )
+    inputs = torch.randn(5, 8)
+    targets = torch.randn(5, 4)
+    loss = torch.nn.functional.mse_loss(module(inputs), targets)
+    loss.backward()
+
+    expected_squared = 0.0
+    for p in module.parameters():
+        if p.grad is None:
+            continue
+        expected_squared += float(p.grad.detach().norm(2).item()) ** 2
+    expected = expected_squared ** 0.5
+
+    actual = compute_grad_norm(module)
+    assert abs(actual - expected) < 1e-5, f"actual={actual} expected={expected}"
+
+
+def test_compute_grad_norm_zero_when_no_grads() -> None:
+    """Gracefully report zero when every parameter's grad is ``None``."""
+
+    from train.train_rssm import compute_grad_norm
+
+    module = torch.nn.Linear(4, 2)
+    assert compute_grad_norm(module) == 0.0

@@ -525,9 +525,13 @@ def run_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         losses["total_loss"].backward()
-        grad_norm = compute_grad_norm(model)
+        # ``clip_grad_norm_`` already returns the total norm; calling
+        # ``compute_grad_norm`` first would be a wasted host-device sync per
+        # step. Only use the standalone helper when clipping is disabled.
         if config.grad_clip > 0.0:
             grad_norm = float(nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip))
+        else:
+            grad_norm = compute_grad_norm(model)
         optimizer.step()
         scheduler.step()
 

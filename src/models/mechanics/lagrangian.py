@@ -58,8 +58,16 @@ class MassMatrix(nn.Module):
         self.q_dim = q_dim
         self.eps = eps
         n_tri = q_dim * (q_dim + 1) // 2
-        self._tri_indices = torch.tril_indices(q_dim, q_dim)
-        self._diag_mask = (self._tri_indices[0] == self._tri_indices[1])
+        # ``_tri_indices`` and ``_diag_mask`` are deterministic constants of
+        # ``q_dim`` but we register them as buffers so ``model.to(device)``
+        # moves them along with the rest of the module — the previous plain-
+        # attribute storage forced a ``.to(raw.device)`` host->device transfer
+        # on every forward. They carry no gradient and no learnable state.
+        tri_indices = torch.tril_indices(q_dim, q_dim)
+        self.register_buffer("_tri_indices", tri_indices, persistent=False)
+        self.register_buffer(
+            "_diag_mask", tri_indices[0] == tri_indices[1], persistent=False,
+        )
         self.net = _mlp(
             input_size=q_dim,
             output_size=n_tri,
@@ -75,11 +83,9 @@ class MassMatrix(nn.Module):
         batch_shape = q.shape[:-1]
         flat = q.reshape(-1, self.q_dim)
         raw = self.net(flat)
-        diag = self._diag_mask.to(raw.device)
-        tri_indices = self._tri_indices.to(raw.device)
-        activated = torch.where(diag, F.softplus(raw) + self.eps, raw)
+        activated = torch.where(self._diag_mask, F.softplus(raw) + self.eps, raw)
         lower = q.new_zeros(flat.shape[0], self.q_dim, self.q_dim)
-        lower[:, tri_indices[0], tri_indices[1]] = activated
+        lower[:, self._tri_indices[0], self._tri_indices[1]] = activated
         mass = lower @ lower.transpose(-1, -2)
         eye = torch.eye(self.q_dim, device=q.device, dtype=q.dtype)
         mass = mass + self.eps * eye
@@ -134,8 +140,13 @@ class Dissipation(nn.Module):
         self.q_dim = q_dim
         self.eps = eps
         n_tri = q_dim * (q_dim + 1) // 2
-        self._tri_indices = torch.tril_indices(q_dim, q_dim)
-        self._diag_mask = (self._tri_indices[0] == self._tri_indices[1])
+        # Same buffer-vs-attribute reasoning as in ``MassMatrix`` — these
+        # tensors travel with the module on ``model.to(device)``.
+        tri_indices = torch.tril_indices(q_dim, q_dim)
+        self.register_buffer("_tri_indices", tri_indices, persistent=False)
+        self.register_buffer(
+            "_diag_mask", tri_indices[0] == tri_indices[1], persistent=False,
+        )
         self.net = _mlp(
             input_size=q_dim,
             output_size=n_tri,
@@ -151,11 +162,9 @@ class Dissipation(nn.Module):
         batch_shape = qdot.shape[:-1]
         flat = qdot.reshape(-1, self.q_dim)
         raw = self.net(flat)
-        diag = self._diag_mask.to(raw.device)
-        tri_indices = self._tri_indices.to(raw.device)
-        activated = torch.where(diag, F.softplus(raw) + self.eps, raw)
+        activated = torch.where(self._diag_mask, F.softplus(raw) + self.eps, raw)
         lower = qdot.new_zeros(flat.shape[0], self.q_dim, self.q_dim)
-        lower[:, tri_indices[0], tri_indices[1]] = activated
+        lower[:, self._tri_indices[0], self._tri_indices[1]] = activated
         c = lower @ lower.transpose(-1, -2)
         return c.reshape(*batch_shape, self.q_dim, self.q_dim)
 
