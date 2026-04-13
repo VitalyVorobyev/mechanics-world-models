@@ -94,7 +94,9 @@ def run_reconstruction_debug(
     validate_config(config)
     set_seed(config.seed)
     device = resolve_device(config.device)
-    checkpoint = torch.load(config.checkpoint_path, map_location=device)
+    checkpoint = torch.load(
+        config.checkpoint_path, map_location=device, weights_only=False
+    )
     checkpoint_config = dict(checkpoint.get("config", {}))
     sequence_length = config.sequence_length or int(checkpoint_config.get("sequence_length", 16))
     val_fraction = config.val_fraction

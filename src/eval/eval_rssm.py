@@ -142,7 +142,10 @@ def evaluate_checkpoint(config: EvalConfig, console: Console | None = None) -> d
     console = console or Console()
     set_seed(config.seed)
     device = resolve_device(config.device)
-    checkpoint = torch.load(config.checkpoint_path, map_location=device)
+    # weights_only=False because our checkpoints carry NumPy RNG state,
+    # scheduler dicts, and the config dataclass alongside the model weights.
+    # Safe — we always load files we wrote ourselves.
+    checkpoint = torch.load(config.checkpoint_path, map_location=device, weights_only=False)
     checkpoint_config = dict(checkpoint.get("config", {}))
     sequence_length = resolve_sequence_length(config, checkpoint_config)
     val_fraction = resolve_val_fraction(config, checkpoint_config)

@@ -155,7 +155,9 @@ def run_overfit_reconstruction(
     checkpoint: dict[str, Any] | None = None
     checkpoint_config: dict[str, Any] = {}
     if config.checkpoint_path is not None:
-        checkpoint = torch.load(config.checkpoint_path, map_location=device)
+        checkpoint = torch.load(
+            config.checkpoint_path, map_location=device, weights_only=False
+        )
         checkpoint_config = dict(checkpoint.get("config", {}))
 
     action_dim = int(actions.shape[-1])
