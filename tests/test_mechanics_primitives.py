@@ -193,6 +193,27 @@ def test_forward_acceleration_validates_shapes() -> None:
         forward_acceleration(dyn, q, torch.randn(3, 3), torch.randn(3, 1))  # qdot mismatch
 
 
+def test_imagination_loop_does_not_use_linalg_solve() -> None:
+    """Regression: forward_acceleration must avoid ``torch.linalg.solve``.
+
+    ``linalg.solve`` is reliably buggy on Apple MPS when used inside a loop
+    that calls ``autograd.grad(create_graph=True)`` and is later backward'd
+    through — it corrupts kernel dispatch and surfaces as
+    ``AcceleratorError: index N is out of bounds`` at the next sync point
+    (e.g. inside ``compute_grad_norm``). We worked around it by using
+    ``linalg.inv(M) @ rhs`` instead; this test pins that decision so a
+    future refactor doesn't regress the MPS path.
+    """
+
+    from models.mechanics import lagrangian as lag_module
+    source = (lag_module.__file__, open(lag_module.__file__).read())
+    assert "torch.linalg.solve" not in source[1], (
+        f"forward_acceleration in {source[0]} must not call torch.linalg.solve "
+        "(MPS dispatch corruption inside autograd.grad loops — see the "
+        "inline comment in forward_acceleration for the rationale)."
+    )
+
+
 def test_pendulum_like_system_oscillates() -> None:
     """Sanity: an unforced, conservative random system should oscillate, not diverge.
 

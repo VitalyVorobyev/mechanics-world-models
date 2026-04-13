@@ -223,14 +223,20 @@ def forward_acceleration(
         d/dt(dL/d(qdot)) - dL/dq = F_ext
           <=>  M(q) q_ddot = dL/dq - M_dot(q) qdot + F_ext
 
-    with ``L = 0.5 qdot^T M(q) qdot - V(q)`` (so qdot is treated as fixed when
-    taking ``dL/dq``) and ``F_ext = -dD/d(qdot) + B(q) u``. ``M_dot(q) qdot``
-    is computed with a forward JVP on ``p(q) = M(q) qdot`` along the direction
-    ``qdot`` — equivalent to ``dM/dt * qdot`` because ``qdot`` is fixed.
+    with ``L = 0.5 qdot^T M(q) qdot - V(q)`` (so ``qdot`` is treated as fixed
+    when taking ``dL/dq``) and ``F_ext = -dD/d(qdot) + B(q) u``.
 
-    Gradients flow back to all module parameters via ``create_graph=True`` on
-    the inner autograd calls; outer-graph gradient wrt ``q`` and ``qdot``
-    propagates through the enable-grad branches as well, so the full
+    ``M_dot(q) qdot`` is computed as ``J_q(M(q) qdot) @ qdot``. We do this
+    with per-component ``autograd.grad`` calls — one per ``q`` dimension —
+    rather than ``autograd.functional.jvp``. The JVP API's double-backward
+    trick hits a reliably reproducible MPS bug (``AcceleratorError: index
+    N is out of bounds``) in PyTorch 2.x; the per-component loop is
+    equivalent for small ``d`` (cartpole has ``d = 2``, so two extra grad
+    calls per step) and stays on the accelerator.
+
+    Gradients flow back to all module parameters via ``create_graph`` on the
+    inner autograd calls; outer-graph gradient wrt ``q`` and ``qdot``
+    propagates through the single enable-grad branch, so the full
     imagination rollout stays end-to-end differentiable.
     """
 
@@ -242,54 +248,85 @@ def forward_acceleration(
             f"{dynamics.actuation.action_dim}; got u.shape={u.shape}",
         )
 
-    # Autograd path: derivatives of T - V wrt q (with qdot held fixed).
+    needs_outer_grad = torch.is_grad_enabled() and (
+        q.requires_grad or qdot.requires_grad or any(
+            p.requires_grad for p in _iter_dynamics_parameters(dynamics)
+        )
+    )
+
     with torch.enable_grad():
-        q_grad = q if q.requires_grad else q.detach().requires_grad_(True)
-        qdot_ref = qdot.detach() if not qdot.requires_grad else qdot
-        mass = dynamics.mass_matrix(q_grad)
-        potential = dynamics.potential(q_grad)
+        # Use q/qdot directly when they carry grad so the outer graph stays
+        # connected; otherwise attach a local leaf so the inner autograd
+        # calls still function (e.g. during eval-mode imagination or CEM).
+        q_in = q if q.requires_grad else q.clone().requires_grad_(True)
+        qdot_ref = qdot.detach()  # holding qdot fixed when differentiating wrt q
+
+        mass = dynamics.mass_matrix(q_in)  # [..., d, d]
+        potential = dynamics.potential(q_in)  # [...]
         kinetic = 0.5 * torch.einsum("...i,...ij,...j->...", qdot_ref, mass, qdot_ref)
         lagrangian_sum = (kinetic - potential).sum()
         (dL_dq,) = torch.autograd.grad(
             lagrangian_sum,
-            q_grad,
-            create_graph=torch.is_grad_enabled(),
+            q_in,
+            create_graph=needs_outer_grad,
+            retain_graph=True,
         )
 
-    # dM/dt * qdot via a forward JVP: direction qdot on p(q) = M(q) qdot.
-    def momentum_of_q(q_in: torch.Tensor) -> torch.Tensor:
-        m = dynamics.mass_matrix(q_in)
-        return torch.einsum("...ij,...j->...i", m, qdot_ref)
+        q_dim = q_in.shape[-1]
+        momentum = torch.einsum("...ij,...j->...i", mass, qdot_ref)  # [..., d]
+        m_dot_qdot_components: list[torch.Tensor] = []
+        for i in range(q_dim):
+            is_last = i == q_dim - 1
+            (grad_component,) = torch.autograd.grad(
+                momentum[..., i].sum(),
+                q_in,
+                create_graph=needs_outer_grad,
+                retain_graph=not is_last or needs_outer_grad,
+            )
+            m_dot_qdot_components.append((grad_component * qdot).sum(dim=-1))
+        m_dot_qdot = torch.stack(m_dot_qdot_components, dim=-1)
 
-    _, m_dot_qdot = torch.autograd.functional.jvp(
-        momentum_of_q,
-        q if q.requires_grad else q.detach(),
-        qdot_ref,
-        create_graph=torch.is_grad_enabled(),
-    )
-
-    # Dissipation: dD/d(qdot).
-    if dynamics.dissipation is not None:
-        with torch.enable_grad():
-            qdot_grad = qdot if qdot.requires_grad else qdot.detach().requires_grad_(True)
-            dissipation_value = dynamics.dissipation(qdot_grad).sum()
+        if dynamics.dissipation is not None:
+            qdot_in = qdot if qdot.requires_grad else qdot.clone().requires_grad_(True)
+            dissipation_value = dynamics.dissipation(qdot_in).sum()
             (dD_dqdot,) = torch.autograd.grad(
                 dissipation_value,
-                qdot_grad,
-                create_graph=torch.is_grad_enabled(),
+                qdot_in,
+                create_graph=needs_outer_grad,
             )
-    else:
-        dD_dqdot = torch.zeros_like(qdot)
+        else:
+            dD_dqdot = torch.zeros_like(qdot)
 
-    b_matrix = dynamics.actuation(q)
-    tau = torch.einsum("...ij,...j->...i", b_matrix, u)
+        b_matrix = dynamics.actuation(q_in)
+        tau = torch.einsum("...ij,...j->...i", b_matrix, u)
 
-    rhs = dL_dq - m_dot_qdot - dD_dqdot + tau
-    # Recompute mass matrix in the outer graph so linalg.solve differentiates
-    # correctly wrt its parameters.
-    mass_outer = dynamics.mass_matrix(q)
-    q_ddot = torch.linalg.solve(mass_outer, rhs.unsqueeze(-1)).squeeze(-1)
+        rhs = dL_dq - m_dot_qdot - dD_dqdot + tau
+        # Prefer ``linalg.inv(M) @ rhs`` over ``linalg.solve`` because
+        # ``linalg.solve`` is buggy on Apple MPS inside an autograd-grad-with-
+        # create-graph loop: it reliably corrupts kernel dispatch and surfaces
+        # later as ``AcceleratorError: index N is out of bounds``. Inversion
+        # is numerically fine here — ``M`` is Cholesky-parameterized PD with an
+        # ``eps`` ridge, so conditioning is bounded, and the matrix is small
+        # (cartpole ``d=2``).
+        mass_inv = torch.linalg.inv(mass)
+        q_ddot = torch.einsum("...ij,...j->...i", mass_inv, rhs)
+
+    if not needs_outer_grad:
+        q_ddot = q_ddot.detach()
     return q_ddot
+
+
+def _iter_dynamics_parameters(dynamics: LagrangianDynamics):
+    """Yield every parameter across the four Lagrangian primitives."""
+
+    for module in (
+        dynamics.mass_matrix,
+        dynamics.potential,
+        dynamics.actuation,
+    ):
+        yield from module.parameters()
+    if dynamics.dissipation is not None:
+        yield from dynamics.dissipation.parameters()
 
 
 def kinetic_energy(
