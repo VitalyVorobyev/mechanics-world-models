@@ -436,10 +436,14 @@ def run_energy_tracking(
         return {}
     full_q = np.concatenate([posterior_q, imagined_q], axis=1)        # [B, 1+H, d]
     full_qdot = np.concatenate([posterior_qdot, imagined_qdot], axis=1)
+    # The model lives on whichever device it was loaded onto; collected
+    # rollouts came back as numpy via ``_to_double_numpy``, so we must move
+    # them back to the model's device before invoking its primitives.
+    device = next(model.parameters()).device
     energy = compute_learned_energy(
         model,
-        torch.from_numpy(full_q).float(),
-        torch.from_numpy(full_qdot).float(),
+        torch.from_numpy(full_q).float().to(device),
+        torch.from_numpy(full_qdot).float().to(device),
     )
     drift = normalized_energy_drift(energy)
     abs_drift = np.abs(drift)
