@@ -9,6 +9,9 @@ standalone training targets later.
 
 - [Minimal RSSM Visual World Model](rssm_visual_world_model.md): the current
   unstructured cartpole pixel world-model baseline.
+- [Mechanics-Structured Visual World Model](mechanics_world_model.md): factored
+  `(q, qdot, z_nuisance)` model with a learned Lagrangian + Rayleigh
+  dissipation transition and a symplectic-style integrator.
 
 ## Shared Notation And Terms
 

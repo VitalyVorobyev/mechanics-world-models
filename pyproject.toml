@@ -36,6 +36,7 @@ overfit-reconstruction = "eval.overfit_reconstruction:main"
 preview-crop = "viz.preview_crop:main"
 preview-dataset = "viz.preview_dataset:main"
 plot-training-history = "viz.plot_training_history:main"
+train-mechanics = "train.train_mechanics:main"
 train-rssm = "train.train_rssm:main"
 
 [tool.setuptools.packages.find]
