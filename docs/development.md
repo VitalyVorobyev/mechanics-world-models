@@ -297,7 +297,7 @@ runs by default:
   --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
   --nuisance-min-std 1.0 \
   --learning-rate 1e-4 --warmup-steps 2000 \
-  --log-every-steps 10 \
+  --log-every-steps 50 \
   --val-open-loop-every-steps 100 \
   --val-open-loop-horizons 1,5,10,20
 ```
@@ -312,9 +312,11 @@ Notes:
   nuisance channel's capacity × KL-stiffness. Larger values on either
   triggered a z-channel KL phase transition at step ~300 in earlier
   iterations; see `current_status.md` for the trace.
-- `--log-every-steps 10` keeps the z-diagnostic metrics
+- `--log-every-steps 50` still keeps the z-diagnostic metrics
   (`z_post_mean_rms`, `kl_z_t0_mean`, `kl_z_transition_mean`, ...)
-  dense enough to catch any regression to the earlier failure modes.
+  dense enough to catch the earlier failure modes (the v2/v3 z blow-up
+  took ~200 steps to manifest) without flooding the terminal. Drop back
+  to `10` if you need per-step visibility for a new debug round.
 
 Recollect the training dataset if you need physics state for K2 / H3
 diagnostics (the v1 dataset at `data/cartpole-swingup-random-100k` was

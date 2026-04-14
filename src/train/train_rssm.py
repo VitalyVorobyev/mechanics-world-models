@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1292,6 +1293,107 @@ def append_history_record(
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+# Curated display groups for on-screen output. Every key in the training-loss
+# dict still lands in history.jsonl via append_history_record; this list only
+# controls what shows up on the terminal so long mechanics runs stay scannable.
+_DISPLAY_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
+    (
+        "loss",
+        (
+            ("total", "total_loss", "{:.4f}"),
+            ("recon", "reconstruction_loss", "{:.4f}"),
+            ("fg", "foreground_reconstruction_loss", "{:.4f}"),
+            ("trans", "transition_reconstruction_loss", "{:.4f}"),
+            ("fg_trans", "foreground_transition_reconstruction_loss", "{:.4f}"),
+            ("imag", "imagination_reconstruction_loss", "{:.4f}"),
+            ("fg_imag", "foreground_imagination_reconstruction_loss", "{:.4f}"),
+            ("dyn", "dynamic_reconstruction_loss", "{:.4f}"),
+            ("latent", "latent_consistency_loss", "{:.4f}"),
+            ("rew", "reward_loss", "{:.4f}"),
+            ("imag_rew", "imagined_reward_loss", "{:.4f}"),
+        ),
+    ),
+    (
+        "kl",
+        (
+            ("total", "kl_loss", "{:.4f}"),
+            ("q", "kl_q_raw", "{:.3f}"),
+            ("qdot", "kl_qdot_raw", "{:.3f}"),
+            ("z", "kl_z_raw", "{:.3f}"),
+        ),
+    ),
+    (
+        "opt",
+        (
+            ("grad", "grad_norm", "{:.2f}"),
+            ("lr", "learning_rate", "{:.2e}"),
+            ("alpha", "nuisance_alpha", "{:.3f}"),
+        ),
+    ),
+    (
+        "diag",
+        (
+            ("q_max", "q_post_mean_abs_max", "{:.3f}"),
+            ("qdot_max", "qdot_post_mean_abs_max", "{:.3f}"),
+            ("z_rms", "z_post_mean_rms", "{:.3f}"),
+        ),
+    ),
+)
+
+_VAL_OPEN_LOOP_KEY = re.compile(r"^val_open_loop_(fg_mse|mse)_h(\d+)$")
+
+_SPLIT_STYLE: dict[str, str] = {
+    "train": "bold green",
+    "train_epoch": "bold cyan",
+    "val": "bold magenta",
+    "val_open_loop": "bold yellow",
+}
+
+
+_ALWAYS_SHOW_KEYS = frozenset({"total_loss", "kl_loss"})
+
+
+def _format_group(
+    label: str,
+    spec: tuple[tuple[str, str, str], ...],
+    metrics: dict[str, float],
+) -> str | None:
+    parts = []
+    for name, key, fmt in spec:
+        if key not in metrics:
+            continue
+        value = metrics[key]
+        # Hide auxiliary loss heads whose weight is zero — they write literal
+        # 0.0 into the metrics dict and only add noise on screen. Always show
+        # the loss totals so a converged run doesn't silently disappear.
+        if value == 0.0 and key not in _ALWAYS_SHOW_KEYS:
+            continue
+        parts.append(f"{name}={fmt.format(value)}")
+    if not parts:
+        return None
+    return f"[dim]{label}[/dim] " + " ".join(parts)
+
+
+def _format_val_open_loop(metrics: dict[str, float]) -> list[str]:
+    by_horizon: dict[int, dict[str, float]] = {}
+    for key, value in metrics.items():
+        m = _VAL_OPEN_LOOP_KEY.match(key)
+        if m is None:
+            continue
+        kind, horizon = m.group(1), int(m.group(2))
+        by_horizon.setdefault(horizon, {})[kind] = value
+    out: list[str] = []
+    for horizon in sorted(by_horizon):
+        entry = by_horizon[horizon]
+        parts = [f"[dim]h{horizon}[/dim]"]
+        if "mse" in entry:
+            parts.append(f"mse={entry['mse']:.4f}")
+        if "fg_mse" in entry:
+            parts.append(f"fg={entry['fg_mse']:.4f}")
+        out.append(" ".join(parts))
+    return out
+
+
 def log_metrics(
     split: str,
     epoch: int,
@@ -1299,22 +1401,38 @@ def log_metrics(
     console: Console,
     global_step: int | None = None,
 ) -> None:
-    """Print one compact metrics line."""
+    """Print one grouped, scannable metrics line to the terminal."""
 
-    metrics_text = " ".join(f"{key}={value:.6f}" for key, value in sorted(metrics.items()))
-    step_text = "" if global_step is None else f" global_step={global_step:07d}"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    split_style = {
-        "train": "bold green",
-        "train_epoch": "bold blue",
-        "val": "bold magenta",
-    }.get(split, "bold")
-    console.print(
+    step_text = "" if global_step is None else f" global_step={global_step:07d}"
+    split_style = _SPLIT_STYLE.get(split, "bold")
+
+    header = (
         f"[dim]{timestamp}[/dim] "
-        f"epoch=[bold]{epoch:04d}[/bold]{step_text} "
         f"split=[{split_style}]{split}[/] "
-        f"{metrics_text}",
+        f"epoch=[bold]{epoch:04d}[/bold]{step_text}"
     )
+
+    if split == "val_open_loop":
+        groups = _format_val_open_loop(metrics)
+    else:
+        groups = []
+        for label, spec in _DISPLAY_GROUPS:
+            rendered = _format_group(label, spec, metrics)
+            if rendered is not None:
+                groups.append(rendered)
+        if not groups:
+            fallback = [
+                f"{k}={v:.4f}" for k, v in sorted(metrics.items())[:4]
+            ]
+            if fallback:
+                groups = [" ".join(fallback)]
+
+    separator = "  [dim]│[/dim]  "
+    if groups:
+        console.print(header + separator + separator.join(groups), soft_wrap=True)
+    else:
+        console.print(header, soft_wrap=True)
 
 
 def print_run_summary(

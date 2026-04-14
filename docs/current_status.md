@@ -165,7 +165,7 @@ good-config plus the Phase-3 architecture:
 --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0
 --nuisance-min-std 1.0
 --learning-rate 1e-4 --warmup-steps 2000
---log-every-steps 10
+--log-every-steps 50
 --val-open-loop-every-steps 100
 ```
 
