@@ -26,17 +26,19 @@ mechanics model, plus the scaffolding needed to compare them under physical
 and visual distribution shift:
 
 - random-policy pixel data collection from DeepMind Control `cartpole-swingup`,
-  with optional `qpos`/`qvel`/`physics_params` serialization for evaluation
+  with automatic `qpos`/`qvel`/`physics_params` serialization for evaluation
   diagnostics (never consumed by a training loss)
 - one-episode-per-file `.npz` storage with 84x84 RGB observations
 - a PyTorch sequence dataset for recurrent world-model training
 - **two trainable world models**: a compact RSSM-style baseline (B1) and a
-  factored `(q, qdot, z_nuisance)` model with learned Lagrangian dynamics
+  factored `(q, q̇, z_nuisance)` model with a learned Lagrangian
   (Cholesky-PD mass matrix, learned potential, PSD Rayleigh dissipation,
-  learned actuation) and a semi-implicit symplectic integrator
+  learned actuation), a semi-implicit symplectic integrator, and a hard
+  kinematic constraint `q̇ = d/dt(q)` enforced by finite differencing `q`
+  in the encoder's forward pass (LNN/HNN-style)
 - offline trainers (`train-rssm`, `train-mechanics`) with JSONL loss history,
-  checkpoints, AdamW + cosine LR, auto-resume, and live open-loop FG-MSE
-  validation probes
+  checkpoints, AdamW + cosine LR, auto-resume, NaN/Inf skip guard, and live
+  open-loop FG-MSE validation probes
 - evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE,
   videos, and contact sheets; `eval-mechanics` additionally reports a
   linear-probe R² onto the simulator's ground-truth state (when available)
@@ -44,13 +46,17 @@ and visual distribution shift:
 - a CEM / MPC planner (`eval-control`) for scoring world-model checkpoints
   on the real environment, including physics-perturbation and
   visual-distractor wrappers for the OOD grid
-- a pytest suite (124 tests at time of writing) covering environment,
-  dataset, model shapes, losses, training-history, MPS regression guards,
-  linear probe, and end-to-end evaluation smoke tests
+- a pytest suite (127 tests at time of writing) covering environment,
+  dataset, model shapes, losses, finite-diff kinematics, training-history,
+  MPS regression guards, linear probe, and end-to-end evaluation smoke
+  tests
 
-Phase 0 (RSSM stable) is closed; the mechanics model is in place but the
-first real training run diverged early — see `docs/current_status.md` for
-the failure mode and the current retry configuration. The ablations
+Phase 0 (RSSM stable) is closed. The mechanics model has been through
+three rounds of debugging — a z-channel KL phase transition and a weak-
+coupling `q`/`q̇` factorization — and the current Phase-3 architecture
+replaces the soft smoothness prior with a hard kinematic constraint. See
+`docs/current_status.md` for the blow-by-blow and the pending training /
+evaluation run on the recollected-with-physics dataset. The ablations
 (no-dissipation, unfactored, reconstruction-free contrastive) and the
 OOD evaluation grid are still ahead.
 
@@ -100,8 +106,9 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-Collect a small random cartpole dataset (add `--store-physics` to save
-`qpos`/`qvel`/`physics_params` for evaluation diagnostics):
+Collect a small random cartpole dataset. Physics state (`qpos`, `qvel`,
+`physics_params`) is serialized automatically — no flag needed. `--physics-
+scale KEY=SCALE` is available for OOD perturbation experiments:
 
 ```bash
 .venv/bin/collect-cartpole \
@@ -132,25 +139,32 @@ FG-MSE probe):
   --device auto
 ```
 
-Train the mechanics model (see `docs/current_status.md` for the live retry
-configuration; the run below is the stable-warmup version):
+Train the mechanics model. The recommended cartpole config is the one that
+emerged from the v2/v3/v4/diag debugging (full story in
+`docs/current_status.md`):
 
 ```bash
 .venv/bin/train-mechanics \
   --dataset-dir data/cartpole-swingup-random \
   --checkpoint-dir checkpoints/mechanics-cartpole \
   --sequence-length 32 --batch-size 32 --epochs 10 \
-  --q-dim 2 --nuisance-dim 32 --dt 0.01 \
+  --q-dim 2 --nuisance-dim 4 --dt 0.01 \
   --imagination-context-steps 4 --imagination-horizon 12 \
   --foreground-imagination-reconstruction-weight 2.0 \
   --kl-weight 0.1 \
   --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
-  --nuisance-min-std 0.3 \
-  --smoothness-weight 1.0 \
+  --nuisance-min-std 1.0 \
   --learning-rate 1e-4 --warmup-steps 2000 \
-  --val-open-loop-every-steps 200 \
+  --log-every-steps 10 \
+  --val-open-loop-every-steps 100 \
   --val-open-loop-horizons 1,5,10,20
 ```
+
+`q̇` is derived from `q` by central differencing in the encoder's forward
+pass — there is no `--smoothness-weight` flag anymore and no soft
+kinematic prior to tune. See the model doc
+[`docs/models/mechanics_world_model.md`](docs/models/mechanics_world_model.md)
+for the reasoning.
 
 Plot the loss history:
 
@@ -255,22 +269,30 @@ Done:
 
 - unstructured RSSM baseline (B1) with imagination-rollout loss, KL balancing,
   foreground-masked reconstruction, AdamW + cosine LR, and a live open-loop
-  FG-MSE probe
-- factored `(q, qdot, z_nuisance)` mechanics model with learned Lagrangian,
-  Rayleigh dissipation, symplectic integrator, three-branch balanced KL, and
-  `qdot` smoothness prior (code + tests; training stability is the active work)
+  FG-MSE probe; stable training to h=10 FG-MSE ≈ 0.005 on 100k cartpole
+- factored `(q, q̇, z_nuisance)` mechanics model with learned Lagrangian,
+  Rayleigh dissipation, symplectic integrator, three-branch balanced KL;
+  z-channel phase transition diagnosed and fixed (`nuisance_dim=4`,
+  `nuisance_min_std=1.0`); `(q, q̇)` factorization hard-wired by finite
+  differencing `q̇ = d/dt(q)` inside the encoder
 - reward prediction head, CEM / MPC planner, physics-perturbation and
   visual-distractor wrappers, `eval-control` entry point
 - linear-probe R² and learned-energy diagnostics for the factorization
+- automatic physics-state serialization in the collector so K2 / H3
+  diagnostics can run without a separate flag
 
 Ahead:
 
-- land a successful mechanics training run (retry config in `docs/current_status.md`)
+- run the Phase-3 mechanics training (`bash scripts/train_mechanics.sh`)
+  and evaluate on the recollected `cartpole-swingup-random-100k-v2`
+  dataset; measure K1 (FG-MSE), K2 (linear probe R² for both q and q̇),
+  H3 (learned-energy drift)
 - B2 (no dissipation), B3 (unfactored LNN+D), B4 (reconstruction-free
   contrastive) ablations
 - OOD evaluation grid across mass / length / damping and visual shifts on
   cartpole, then acrobot
-- keep the implementation inspectable enough to debug failure cases directly
+- keep the implementation inspectable enough to debug failure cases
+  directly
 
 Actor-critic training, replay APIs, zarr storage, and distributed collection
 are deliberately out of scope until the main comparison is complete.

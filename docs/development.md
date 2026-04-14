@@ -52,6 +52,15 @@ Collect a more useful first training dataset:
   --image-size 84
 ```
 
+Physics state (`qpos`, `qvel`, `physics_params`) is serialized
+automatically into each NPZ. The dataloader exposes these as
+`physics_qpos` / `physics_qvel` samples, consumed only by
+`eval-mechanics` diagnostics (linear probe + energy drift) — never
+by a training loss.
+
+Use `--physics-scale KEY=SCALE` (repeatable) to perturb simulator
+parameters for OOD collection, e.g. `--physics-scale body_mass_2=0.5`.
+
 In this collector, `--total-frames` means stored transitions, not raw MuJoCo
 physics steps. Each stored transition applies one action for `action_repeat`
 dm_control steps. Each episode file stores `N + 1` images and `N` transition
@@ -268,6 +277,72 @@ Resume from the latest checkpoint:
   --checkpoint-dir checkpoints/rssm-cartpole-random-100k \
   --resume-from checkpoints/rssm-cartpole-random-100k/latest.pt
 ```
+
+## Train The Mechanics Model
+
+Run the current cartpole config (the one that emerged from the v2/v3/v4/
+diag debugging documented in [`current_status.md`](current_status.md)).
+`scripts/train_mechanics.sh` holds this verbatim and is what the project
+runs by default:
+
+```bash
+.venv/bin/train-mechanics \
+  --dataset-dir data/cartpole-swingup-random-100k \
+  --checkpoint-dir checkpoints/mechanics-phase3-finitediff \
+  --sequence-length 32 --batch-size 32 --epochs 10 \
+  --q-dim 2 --nuisance-dim 4 --dt 0.01 \
+  --imagination-context-steps 4 --imagination-horizon 12 \
+  --foreground-imagination-reconstruction-weight 2.0 \
+  --kl-weight 0.1 \
+  --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
+  --nuisance-min-std 1.0 \
+  --learning-rate 1e-4 --warmup-steps 2000 \
+  --log-every-steps 10 \
+  --val-open-loop-every-steps 100 \
+  --val-open-loop-horizons 1,5,10,20
+```
+
+Notes:
+
+- `q̇` is derived from `q` by finite differencing inside the encoder's
+  forward pass (central diff interior, forward / backward at boundaries).
+  No `--smoothness-weight` flag — the kinematic constraint is structural,
+  not a soft loss term.
+- `--nuisance-dim 4` + `--nuisance-min-std 1.0` together control the
+  nuisance channel's capacity × KL-stiffness. Larger values on either
+  triggered a z-channel KL phase transition at step ~300 in earlier
+  iterations; see `current_status.md` for the trace.
+- `--log-every-steps 10` keeps the z-diagnostic metrics
+  (`z_post_mean_rms`, `kl_z_t0_mean`, `kl_z_transition_mean`, ...)
+  dense enough to catch any regression to the earlier failure modes.
+
+Recollect the training dataset if you need physics state for K2 / H3
+diagnostics (the v1 dataset at `data/cartpole-swingup-random-100k` was
+collected before automatic physics-state serialization):
+
+```bash
+bash scripts/collect_cartpole.sh
+```
+
+The script writes to `data/cartpole-swingup-random-100k-v2` with the same
+seed / image / action-repeat parameters as v1 — image trajectories are
+bit-identical, only the extra `qpos` / `qvel` arrays are new.
+
+Evaluate (matches the same sequence-split and warmup as `eval-rssm` so the
+two models are directly comparable):
+
+```bash
+.venv/bin/eval-mechanics \
+  --checkpoint-path checkpoints/mechanics-phase3-finitediff/latest.pt \
+  --dataset-dir data/cartpole-swingup-random-100k-v2 \
+  --output-dir eval/mechanics-phase3-finitediff \
+  --sequence-length 32 --warmup-length 5 --horizons 1 5 10
+```
+
+`metrics.json` additionally carries `linear_probe.q_to_qpos_r2_overall`,
+`linear_probe.qdot_to_qvel_r2_overall` (K2 gate, threshold 0.8) and
+`energy.mean_abs_drift`, `energy.mean_abs_drift_h10` (H3) when the dataset
+carries physics state.
 
 ## Plot Training History
 

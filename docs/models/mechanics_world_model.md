@@ -34,21 +34,30 @@ evolution is governed by physics.
 
 The latent is split into three pieces, each with a different role:
 
-- **`q` (generalized coordinate, dim `d = 2` on cartpole).** Meant to
-  track the physically relevant *pose*: for cartpole that is cart
-  position and pole angle, though the model is free to use any smooth
-  linear reparameterization of these. The only things that constrain
-  `q` are (a) its finite difference must match `qdot` and (b) the
-  Lagrangian step starting from `q_t` must predict `q_{t+1}`.
-- **`qdot` (generalized velocity, dim `d`).** Meant to be the time
-  derivative of `q`. The smoothness prior is what actually enforces
-  this — without it there is no reason the encoder would put velocity
-  into `qdot` rather than dumping it into the nuisance channel.
-- **`z` (nuisance, dim `k = 32`).** Meant to absorb everything the
-  mechanics branch does not need to predict the future: appearance,
-  lighting, background texture, camera pose, distractor patterns.
-  Evolves under a simple AR(1) so it persists but is not expected to
-  be forecast from physics.
+- **`q` (generalized coordinate, dim `d = 2` on cartpole).** Tracks the
+  physically relevant *pose*: for cartpole that is cart position and
+  pole angle, though the model is free to use any smooth linear
+  reparameterization of these. The Lagrangian step starting from `q_t`
+  must predict `q_{t+1}`, and its time-derivative is the model's
+  velocity.
+- **`qdot` (generalized velocity, dim `d`).** **Derived, not learned
+  independently.** Computed in the encoder's forward pass as the
+  finite-difference time-derivative of `q`:
+  `q̇_t = (q_{t+1} − q_{t−1}) / (2·dt)` in the interior, with forward /
+  backward diff at the boundaries. This hard-wires the kinematic
+  identity `q̇ = d/dt(q)` by construction; there is no way for the
+  encoder to decouple position and velocity, no soft smoothness
+  regularizer, no optimization dynamics that can make them drift
+  apart. Same pattern as LNN/HNN-from-pixels (Cranmer et al. 2020,
+  Greydanus et al. 2019, Toth et al. 2020).
+- **`z` (nuisance, dim `k = 4` for cartpole).** Meant to absorb
+  everything the mechanics branch does not need to predict the future:
+  appearance, lighting, background texture, camera pose, distractor
+  patterns. Evolves under a simple AR(1) so it persists but is not
+  expected to be forecast from physics. Kept small (`k = 4`) because
+  cartpole has essentially no visual style variation; earlier
+  iterations with `k = 32` let the encoder abuse `z` for per-frame
+  pixel detail, triggering a KL blow-up at step ~300.
 
 Each of the four Lagrangian primitives is small (a two-layer MLP) and
 has a specific physical role the model is being pushed to learn:
@@ -83,10 +92,10 @@ produces an image.
 Compared to the RSSM, nearly every choice in this model is a
 commitment: the mass matrix is PD, the integrator is symplectic, the
 KL budget is tighter on the mechanics branch than on the nuisance
-branch, the smoothness prior ties the two encoder heads into a
-derivative relationship. Any one of these commitments could be wrong
-for a given environment — the ablations (B2 no-dissipation, B3 no
-q/z split) exist exactly to probe this.
+branch, and `q̇` is a finite-difference of `q` by construction. Any
+one of these commitments could be wrong for a given environment — the
+ablations (B2 no-dissipation, B3 no q/z split) exist exactly to probe
+this.
 
 ## Physical Intuition For The Primitives
 
@@ -121,8 +130,10 @@ real meaning:
   recover a diagnostic R² (the K2 gate, `fit_linear_probe` in
   `src/eval/probes.py`). Values of R² close to 1 mean the encoder
   found generalized coordinates up to a linear reparameterization.
-- `qdot_t` should approximately equal `(q_{t+1} − q_t) / dt`. The
-  smoothness loss reports exactly this residual.
+- `qdot_t` is, by construction, `(q_{t+1} − q_{t−1}) / (2·dt)` (central
+  difference interior; forward / backward at boundaries). No loss or
+  optimization step is needed to enforce this — it is computed
+  explicitly inside `FactoredEncoder.forward`.
 - `z_t` is not expected to be interpretable. It should, however, vary
   slowly (`α ≈ 0.95`) and not carry any information the mechanics
   branch needs.
@@ -142,12 +153,15 @@ real meaning:
   should stay on the manifold of physically plausible configurations
   for much longer.
 
-**CEM / online MPC.** `initial_posterior` and `posterior_step` return
-`(q, qdot, z)` from a single frame; `imagine_rollout_features` rolls
-forward under a candidate action sequence and returns decoded features
-suitable for the reward head. The planner does not know or need to
-know that the latent is factored — it just sees a dense feature tensor
-and a reward head.
+**CEM / online MPC.** Because `q̇` is derived by finite differencing,
+the encoder requires **two consecutive frames** to produce a velocity;
+`initial_posterior` and `posterior_step` accept `[B, T ≥ 2, C, H, W]`
+and return `(q, q̇, z)` at the latest timestep. The existing warmup in
+`eval-control` (K_ctx ≥ 4) already satisfies this. `imagine_rollout_
+features` rolls forward under a candidate action sequence and returns
+decoded features suitable for the reward head. The planner does not
+know or need to know that the latent is factored — it just sees a
+dense feature tensor and a reward head.
 
 ## Architecture and Parameters
 
@@ -160,24 +174,31 @@ Default cartpole training configuration:
 - observations: `[B, T, 3, 84, 84]`, float32 in `[0, 1]`
 - actions: `[B, T, 1]`, float32
 - generalized coordinate dim `d = 2` (cartpole)
-- nuisance dim `k = 32`
+- nuisance dim `k = 4` (kept small — cartpole has near-zero visual
+  style variation, and larger `k` triggered a KL blow-up in earlier
+  iterations; see `docs/current_status.md`)
 - shared encoder embedding `E = 256`
-- decoder input dim `2d + k = 36`
+- decoder input dim `2d + k = 8`
 - integrator step `dt = 0.01` s, `n_substeps = 1`
 
 ### Encoder (`src/models/mechanics/encoder.py::FactoredEncoder`)
 
 Shared `ConvEncoder` trunk (identical to the RSSM baseline) feeds two heads:
 
-- **MechHead**: `Linear(E, 128) -> ELU -> Linear(128, 4d)` — emits
-  `(q_mean, q_std, qdot_mean, qdot_std)` per frame, independent in time.
+- **MechHead**: `Linear(E, 128) -> ELU -> Linear(128, 2d)` — emits
+  `(q_mean, q_raw_std)` per frame. Only `q` is emitted; `q̇` is derived
+  from `q` by central / boundary finite differencing inside
+  `FactoredEncoder.forward` via `derive_qdot_from_q(q_mean, q_std, dt)`.
 - **NuisanceHead**: `Linear(E, 128) -> ELU -> Linear(128, 2k)` — emits
-  `(z_mean, z_std)` per frame.
+  `(z_mean, z_raw_std)` per frame.
 
-Posterior stds use `softplus(raw) + min_std` with `mech_min_std = 0.05` and
-`nuisance_min_std = 0.1`. The encoder is intentionally weak as a
-factorizing module on its own; the gradient signal that forces the split
-to mean anything comes from the Lagrangian prior + smoothness loss.
+Posterior stds use `softplus(raw) + min_std` with `mech_min_std = 0.05`
+and `nuisance_min_std = 1.0` (raised from 0.1 during debugging — see
+status doc). The derived `q̇_std` is the Gaussian pushforward of `q_std`
+through the diff stencil:
+`q̇_std_t = sqrt(q_std_{t+1}² + q_std_{t−1}²) / (2·dt)` in the interior.
+Requires `T ≥ 2` along the time axis — at MPC inference, the caller
+must buffer two consecutive frames.
 
 ### Lagrangian Dynamics (`src/models/mechanics/lagrangian.py`)
 
@@ -227,8 +248,13 @@ q_{t+1}, qdot_{t+1} = SemiImplicitEuler(M, V, D, B, q_t, qdot_t, u_t)
 z_{t+1}             = alpha * z_t                # alpha learnable in (0, 1)
 ```
 
-with three learnable per-coordinate prior stds (`q`, `qdot`, `z`). At `t=0`
-the prior is unit Gaussian (no history to condition on).
+with three learnable per-coordinate prior stds (`q`, `qdot`, `z`). The
+prior std floor for `q̇` defaults to `prior_min_std / dt` so the
+integrator's predicted velocity uncertainty matches the scale of the
+encoder's pushforward `q̇_std ≈ q_std / dt` — without this auto-scaling,
+`KL(posterior q̇ ‖ prior q̇)` explodes at init because of the 100× σ
+mismatch under `dt = 0.01`. At `t = 0` the prior is unit Gaussian (no
+history to condition on).
 
 ### Decoder
 
@@ -253,7 +279,6 @@ total_loss =
   + imagination_reconstruction_weight * imagination_reconstruction_loss
   + foreground_imagination_reconstruction_weight * foreground_imagination_reconstruction_loss
   + kl_weight * (kl_q_loss + kl_qdot_loss + kl_z_loss)
-  + smoothness_weight * smoothness_loss
   + reward_weight * reward_loss
   + imagined_reward_weight * imagined_reward_loss
 ```
@@ -261,21 +286,29 @@ total_loss =
 Notable terms specific to this model:
 
 - **Three-branch balanced KL** with a per-branch free-nats floor:
-  `kl_free_nats_mech = 0.5` for `q` and `qdot`; `kl_free_nats_nuisance = 3.0`
-  for `z`. The asymmetric budget keeps the nuisance branch loose so the
-  encoder can park appearance there, while the mechanics branch is held
-  tight against the integrator-derived prior. Each branch uses
-  DreamerV2-style balancing with `alpha = 0.8`.
-- **Smoothness prior on qdot**:
-  `‖0.5 * (qdot_t + qdot_{t+1}) − stop_grad((q_{t+1} − q_t) / dt)‖²`. This is
-  the single most informative regularizer against state collapse — it
-  forces the encoder's two mechanics heads into a finite-difference
-  derivative relationship, which is the assumption the Lagrangian step
-  expects. Default weight `1.0`.
+  `kl_free_nats_mech = 0.5` for `q` and `qdot`; `kl_free_nats_nuisance
+  = 3.0` for `z`. The asymmetric budget keeps the nuisance branch
+  loose so the encoder can park appearance there, while the mechanics
+  branch is held tight against the integrator-derived prior. Each
+  branch uses DreamerV2-style balancing with `alpha = 0.8`. `kl_qdot`
+  is a *consistency check*: the integrator's predicted velocity
+  should match the finite-difference velocity derived from `q`. Large
+  values mean the learned Lagrangian is inconsistent with the
+  observed motion of the encoder's `q`.
+- **No smoothness prior.** An earlier iteration of the model had a
+  soft smoothness loss (`‖½(q̇_t + q̇_{t+1}) − (q_{t+1} − q_t)/dt‖²`)
+  that tied the encoder's two independent mechanics heads into a
+  derivative relationship. It proved too weak — reconstruction
+  pressure drove `q̇` to encode per-frame pixel detail instead of
+  velocity, inflating `q̇` to magnitude ~15 by epoch 6. The current
+  design eliminates the problem at the architecture level by deriving
+  `q̇` from `q` in the forward pass. No soft constraint needed; none
+  possible to drift away from.
 - **Imagination rollout** is identical in shape to the Phase-0 RSSM
-  imagination contract: a posterior context of `K_ctx` steps followed by
-  `K_imag` closed-loop prior steps decoded with the same decoder.
-  `imagined_reconstructions[:, k]` targets `next_observations[:, K_ctx-1+k]`.
+  imagination contract: a posterior context of `K_ctx` steps followed
+  by `K_imag` closed-loop prior steps decoded with the same decoder.
+  `imagined_reconstructions[:, k]` targets
+  `next_observations[:, K_ctx-1+k]`.
 - The reconstruction and foreground reconstruction losses reuse the
   Phase-0 background-subtraction mask helpers from `models.losses`.
 
@@ -288,24 +321,31 @@ Default optimizer settings:
 
 - `torch.optim.AdamW`, `lr = 3e-4`, `weight_decay = 1e-6`
 - linear warmup `1000` steps, cosine decay to 0 across the run
-- gradient clip `100.0`
+- gradient clip `100.0` + a NaN/Inf optimizer-step guard (skip step if
+  the loss or clipped gradient norm is non-finite; keeps AdamW's
+  running moments intact under cold-start numerical noise)
 - AdamW + cosine schedule + RNG capture/restore + auto-resume + per-step
-  validation open-loop probe (`val_open_loop_*` flags) match the Phase-0
-  trainer one-for-one so `history.jsonl` is comparable across B1 and the
-  mechanics model.
+  validation open-loop probe (`val_open_loop_*` flags) match the
+  Phase-0 trainer one-for-one so `history.jsonl` is comparable across
+  B1 and the mechanics model.
 
-Default loss weights:
+The recommended live-training config (from
+`scripts/train_mechanics.sh`, derived by the v2/v3/v4/diag debugging
+iterations documented in `docs/current_status.md`):
 
 ```
-reconstruction_weight                          = 1.0
-foreground_reconstruction_weight               = 1.0
-foreground_imagination_reconstruction_weight   = 2.0
-imagination_reconstruction_weight              = 0.0
-kl_weight                                      = 1.0
+kl_weight                                      = 0.1
 kl_balance_alpha                               = 0.8
 kl_free_nats_mech                              = 0.5
 kl_free_nats_nuisance                          = 3.0
-smoothness_weight                              = 1.0
+nuisance_min_std                               = 1.0
+nuisance_dim                                   = 4
+learning_rate                                  = 1e-4
+warmup_steps                                   = 2000
+foreground_imagination_reconstruction_weight   = 2.0
+reconstruction_weight                          = 1.0
+foreground_reconstruction_weight               = 1.0
+imagination_reconstruction_weight              = 0.0
 reward_weight, imagined_reward_weight          = 0.0
 ```
 
@@ -337,16 +377,25 @@ specific ones:
   reconstruction is good, the Lagrangian is not fitting the data — the
   structural bias is too strong for this environment or too weak
   (not enough MLP capacity in `M, V, D, B`).
-- **`smoothness_loss`** dropping toward a small value means the encoder
-  has actually learned to make `qdot` the finite difference of `q`. If
-  it plateaus high, the two mechanics heads are drifting apart and
-  the linear probe will not work.
-- **`kl_q_raw`, `kl_qdot_raw`, `kl_z_raw`**: the three balanced KL
-  branches. We expect the mechanics branches to be *small* in nats
-  (the integrator prior is close to the posterior by design) and the
-  nuisance branch to be larger. The `kl_*_free_nats_active` flags tell
-  you whether the respective floor is binding — for the mechanics
-  branches it usually is early in training and should lift later.
+- **`kl_q_raw`**: small (~1 nat) if the Lagrangian's predicted
+  position matches the encoder's position observations.
+- **`kl_qdot_raw`**: starts moderately high at init (~200 nats) from
+  the pushforward mismatch against an untrained integrator; should
+  drop as the integrator learns to produce velocities consistent with
+  the finite-difference of `q`. Large stable values mean the learned
+  Lagrangian is physically inconsistent with the observed motion.
+- **`kl_z_raw`**: the nuisance KL. `kl_free_nats_nuisance = 3` means
+  the clamped contribution is ≥ 3 nats; raw values in `[5, 30]` are
+  the healthy range on cartpole.
+- **`z_post_mean_rms`, `z_post_mean_abs_max`, `kl_z_t0_mean`,
+  `kl_z_transition_mean`**: diagnostic metrics added after the v3
+  debugging. Growing `z_post_mean_rms` or `kl_z_t0_mean` indicates
+  posterior escape — z is drifting to unbounded magnitude under the
+  weak AR(1) anchor. Currently well-controlled with `nuisance_dim = 4`
+  and `nuisance_min_std = 1.0`.
+- **`q_post_mean_abs_max`, `qdot_post_mean_abs_max`**: the derived
+  `q̇_max` is structurally bounded by `q_max / dt`; if `q` stays
+  bounded (it does on cartpole), so does `q̇`.
 - **`nuisance_alpha`**: the learned AR(1) coefficient. Should move
   toward 1 as training progresses if `z` is carrying slowly-varying
   appearance, and toward 0 if it is not learning to persist anything.
@@ -354,11 +403,9 @@ specific ones:
 Typical failure modes unique to this model:
 
 - *Factorization collapse*. All useful information ends up in `z`; `q`
-  and `qdot` become near-constants. Symptoms: linear probe R² ≈ 0,
-  smoothness loss is tiny (both sides are ~0), open-loop prediction
-  works but is driven entirely by `z`'s AR(1). Mitigation: increase
-  `smoothness_weight`, lower `kl_free_nats_nuisance`, shrink the
-  nuisance dim.
+  becomes near-constant. Symptoms: linear probe R² ≈ 0, open-loop
+  prediction works but is driven entirely by `z`'s AR(1). Mitigation:
+  lower `kl_free_nats_nuisance`, shrink the nuisance dim further.
 - *Rigid mechanics*. `q` tracks something reasonable but `M(q)` /
   `V(q)` are nearly constant, so the integrator step degenerates to a
   free-particle update. Symptoms: open-loop at short horizons is
@@ -376,6 +423,11 @@ Typical failure modes unique to this model:
   Mitigation: start `Dissipation.net[-1].bias` near zero (its default
   initialization does this) and/or use `--no-dissipation` as a
   sanity-check ablation.
+- *Nuisance posterior escape*. z_mean grows unbounded under the weak
+  AR(1) anchor (only the `t=0` term pulls toward zero; see v2/v3
+  debugging in the status doc). Mitigation: small `nuisance_dim` (4
+  works on cartpole), large `nuisance_min_std` (1.0), watch the
+  z-diagnostic metrics for early warning.
 
 ## Relation to Other Models
 
