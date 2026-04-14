@@ -11,28 +11,48 @@ control under shifted mass, length, friction, camera pose, background, and
 lighting.
 
 The full research plan is in [`docs/research_spec.md`](docs/research_spec.md).
-Trainable model notes live in [`docs/models/`](docs/models/), starting with the
-current [minimal RSSM visual world model](docs/models/rssm_visual_world_model.md).
-The current baseline status and the foreground-reconstruction debugging problem
-are summarized in [`docs/current_status.md`](docs/current_status.md).
+Trainable model notes live in [`docs/models/`](docs/models/):
+- [minimal RSSM visual world model](docs/models/rssm_visual_world_model.md)
+- [mechanics-structured visual world model](docs/models/mechanics_world_model.md)
+
+The live status of the research — what works, what the open problem is, and
+the next experiment to run — is tracked in
+[`docs/current_status.md`](docs/current_status.md).
 
 ## Current Status
 
-This repository is still early. The current code builds the unstructured baseline
-needed before adding the mechanics prior:
+The repository now contains both the unstructured baseline and the factored
+mechanics model, plus the scaffolding needed to compare them under physical
+and visual distribution shift:
 
-- random-policy pixel data collection from DeepMind Control `cartpole-swingup`
+- random-policy pixel data collection from DeepMind Control `cartpole-swingup`,
+  with optional `qpos`/`qvel`/`physics_params` serialization for evaluation
+  diagnostics (never consumed by a training loss)
 - one-episode-per-file `.npz` storage with 84x84 RGB observations
 - a PyTorch sequence dataset for recurrent world-model training
-- a compact RSSM-style visual world model
-- an offline trainer with JSONL loss history, checkpoints, loss plotting, and
-  an opt-in transition-aligned latent consistency objective
-- small tests for the environment wrapper, dataset layer, model shapes, losses,
-  and training-history plotting
+- **two trainable world models**: a compact RSSM-style baseline (B1) and a
+  factored `(q, qdot, z_nuisance)` model with learned Lagrangian dynamics
+  (Cholesky-PD mass matrix, learned potential, PSD Rayleigh dissipation,
+  learned actuation) and a semi-implicit symplectic integrator
+- offline trainers (`train-rssm`, `train-mechanics`) with JSONL loss history,
+  checkpoints, AdamW + cosine LR, auto-resume, and live open-loop FG-MSE
+  validation probes
+- evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE,
+  videos, and contact sheets; `eval-mechanics` additionally reports a
+  linear-probe R² onto the simulator's ground-truth state (when available)
+  and a learned-energy drift diagnostic
+- a CEM / MPC planner (`eval-control`) for scoring world-model checkpoints
+  on the real environment, including physics-perturbation and
+  visual-distractor wrappers for the OOD grid
+- a pytest suite (124 tests at time of writing) covering environment,
+  dataset, model shapes, losses, training-history, MPS regression guards,
+  linear probe, and end-to-end evaluation smoke tests
 
-The next stage is the structured model: a factored latent state with mechanical
-coordinates, learned Lagrangian dynamics, Rayleigh dissipation, nuisance factors,
-and MPC evaluation under physical and visual distribution shift.
+Phase 0 (RSSM stable) is closed; the mechanics model is in place but the
+first real training run diverged early — see `docs/current_status.md` for
+the failure mode and the current retry configuration. The ablations
+(no-dissipation, unfactored, reconstruction-free contrastive) and the
+OOD evaluation grid are still ahead.
 
 ## Why This Exists
 
@@ -54,13 +74,18 @@ complex DeepMind Control tasks.
 ## Repository Layout
 
 ```text
-src/envs/     dm_control pixel environment wrapper
-src/data/     NPZ trajectory storage, sequence dataset, dataset stats
-src/models/   encoder, decoder, RSSM, world-model loss
-src/train/    offline RSSM training entry point
-src/viz/      dataset previews and training-history plots
-tests/        lightweight pytest suite
-docs/         research notes and development instructions
+src/envs/            dm_control pixel environment wrapper + physics-perturbation helpers
+src/data/            NPZ trajectory storage (+ optional qpos/qvel/physics_params), sequence dataset, dataset stats
+src/models/          shared encoder / decoder / losses
+src/models/mechanics Lagrangian primitives, symplectic integrator, factored (q, qdot, z) transition and world model, mechanics-specific loss
+src/models/contrastive (planned) reconstruction-free B4 ablation
+src/planning/        CEM / MPC planner that consumes either trainable world model
+src/train/           offline train-rssm and train-mechanics entry points
+src/eval/            eval-rssm, eval-mechanics, eval-control, linear-probe and energy diagnostics
+src/viz/             dataset previews, prediction videos/contact sheets, training-history plots
+scripts/             convenience shell wrappers + scripts/bench_mechanics_step.py perf harness
+tests/               pytest suite (unit + end-to-end smoke)
+docs/                research spec, current status, development guide, per-model docs
 ```
 
 ## Try The Baseline
@@ -75,7 +100,8 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-Collect a small random cartpole dataset:
+Collect a small random cartpole dataset (add `--store-physics` to save
+`qpos`/`qvel`/`physics_params` for evaluation diagnostics):
 
 ```bash
 .venv/bin/collect-cartpole \
@@ -86,39 +112,44 @@ Collect a small random cartpole dataset:
   --image-size 84
 ```
 
-Train the RSSM baseline:
+Train the RSSM baseline (the Phase-0 configuration uses imagination-rollout
+loss, KL balancing with free-nats, AdamW + cosine LR, and a live open-loop
+FG-MSE probe):
 
 ```bash
 .venv/bin/train-rssm \
   --dataset-dir data/cartpole-swingup-random \
   --checkpoint-dir checkpoints/rssm-cartpole \
-  --sequence-length 16 \
+  --sequence-length 32 \
   --batch-size 32 \
   --epochs 10 \
+  --foreground-reconstruction-weight 1.0 \
+  --foreground-imagination-reconstruction-weight 2.0 \
+  --imagination-context-steps 4 --imagination-horizon 12 \
+  --kl-weight 1.0 --kl-free-nats 0.5 \
+  --val-open-loop-every-steps 500 \
+  --val-open-loop-horizons 1,5,10,20 \
   --device auto
 ```
 
-For the current foreground/debugging experiment, keep the decoder for
-diagnostics but downweight full-frame pixel MSE, add a posterior foreground
-reconstruction term, and train the transition-prior decoder directly against
-`obs_{t+1}` with a foreground-weighted next-frame term:
+Train the mechanics model (see `docs/current_status.md` for the live retry
+configuration; the run below is the stable-warmup version):
 
 ```bash
-.venv/bin/train-rssm \
+.venv/bin/train-mechanics \
   --dataset-dir data/cartpole-swingup-random \
-  --checkpoint-dir checkpoints/rssm-cartpole-foreground-transition \
-  --sequence-length 16 \
-  --batch-size 32 \
-  --epochs 10 \
-  --reconstruction-weight 0.05 \
-  --foreground-reconstruction-weight 2.0 \
-  --foreground-mask-floor 0.02 \
-  --foreground-mask-kernel-size 7 \
-  --transition-reconstruction-weight 0.0 \
-  --foreground-transition-reconstruction-weight 2.0 \
-  --dynamic-reconstruction-weight 0.0 \
-  --latent-consistency-weight 0.0 \
-  --device auto
+  --checkpoint-dir checkpoints/mechanics-cartpole \
+  --sequence-length 32 --batch-size 32 --epochs 10 \
+  --q-dim 2 --nuisance-dim 32 --dt 0.01 \
+  --imagination-context-steps 4 --imagination-horizon 12 \
+  --foreground-imagination-reconstruction-weight 2.0 \
+  --kl-weight 0.1 \
+  --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
+  --nuisance-min-std 0.3 \
+  --smoothness-weight 1.0 \
+  --learning-rate 1e-4 --warmup-steps 2000 \
+  --val-open-loop-every-steps 200 \
+  --val-open-loop-horizons 1,5,10,20
 ```
 
 Plot the loss history:
@@ -129,16 +160,34 @@ Plot the loss history:
   --output-path checkpoints/rssm-cartpole/loss_history.png
 ```
 
-Evaluate reconstruction and open-loop prediction quality:
+Evaluate reconstruction and open-loop prediction quality. `eval-mechanics`
+produces the same metric layout as `eval-rssm` (so the two models are
+directly comparable) plus a linear-probe R² and learned-energy drift when
+the dataset has `physics_qpos`/`physics_qvel`:
 
 ```bash
 .venv/bin/eval-rssm \
   --checkpoint-path checkpoints/rssm-cartpole/latest.pt \
   --dataset-dir data/cartpole-swingup-random \
   --output-dir eval/rssm-cartpole \
-  --sequence-length 16 \
-  --warmup-length 5 \
-  --horizons 1 5 10
+  --warmup-length 4 --horizons 1 5 10 20
+
+.venv/bin/eval-mechanics \
+  --checkpoint-path checkpoints/mechanics-cartpole/latest.pt \
+  --dataset-dir data/cartpole-swingup-random \
+  --output-dir eval/mechanics-cartpole \
+  --warmup-length 4 --horizons 1 5 10 20
+```
+
+Drive the trained world model through CEM / MPC on the real environment to
+get an episode-return number (requires the checkpoint to have been trained
+with `--reward-head`):
+
+```bash
+.venv/bin/eval-control \
+  --checkpoint-path checkpoints/mechanics-cartpole/latest.pt \
+  --output-dir eval/mechanics-control \
+  --episodes 5 --horizon 15
 ```
 
 Debug missing foreground reconstructions:
@@ -202,12 +251,26 @@ Arrays include `images`, `actions`, `rewards`, `discounts`, `dones`, and
 
 ## Roadmap
 
-- add the mechanics-structured latent dynamics model
-- add reward prediction and MPC evaluation
-- add physical parameter shifts for cartpole and acrobot
-- add visual nuisance shifts for camera/background/lighting
-- compare against the RSSM baseline under the same data and compute budget
+Done:
+
+- unstructured RSSM baseline (B1) with imagination-rollout loss, KL balancing,
+  foreground-masked reconstruction, AdamW + cosine LR, and a live open-loop
+  FG-MSE probe
+- factored `(q, qdot, z_nuisance)` mechanics model with learned Lagrangian,
+  Rayleigh dissipation, symplectic integrator, three-branch balanced KL, and
+  `qdot` smoothness prior (code + tests; training stability is the active work)
+- reward prediction head, CEM / MPC planner, physics-perturbation and
+  visual-distractor wrappers, `eval-control` entry point
+- linear-probe R² and learned-energy diagnostics for the factorization
+
+Ahead:
+
+- land a successful mechanics training run (retry config in `docs/current_status.md`)
+- B2 (no dissipation), B3 (unfactored LNN+D), B4 (reconstruction-free
+  contrastive) ablations
+- OOD evaluation grid across mass / length / damping and visual shifts on
+  cartpole, then acrobot
 - keep the implementation inspectable enough to debug failure cases directly
 
-Actor-critic training, replay APIs, zarr storage, and distributed collection are
-deliberately out of scope until the small baseline is correct.
+Actor-critic training, replay APIs, zarr storage, and distributed collection
+are deliberately out of scope until the main comparison is complete.
