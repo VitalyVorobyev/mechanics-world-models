@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,6 @@ class MechanicsTrainConfig:
     foreground_imagination_reconstruction_weight: float = 2.0
     imagination_context_steps: int = 4
     imagination_horizon: int = 12
-    smoothness_weight: float = 1.0
     reward_head: bool = False
     reward_head_hidden_size: int = 200
     reward_weight: float = 0.0
@@ -170,7 +170,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--imagination-context-steps", type=int, default=4)
     parser.add_argument("--imagination-horizon", type=int, default=12)
-    parser.add_argument("--smoothness-weight", type=float, default=1.0)
     parser.add_argument("--reward-head", action="store_true")
     parser.add_argument("--reward-head-hidden-size", type=int, default=200)
     parser.add_argument("--reward-weight", type=float, default=0.0)
@@ -242,7 +241,6 @@ def config_from_args(args: argparse.Namespace) -> MechanicsTrainConfig:
         ),
         imagination_context_steps=args.imagination_context_steps,
         imagination_horizon=args.imagination_horizon,
-        smoothness_weight=args.smoothness_weight,
         reward_head=args.reward_head,
         reward_head_hidden_size=args.reward_head_hidden_size,
         reward_weight=args.reward_weight,
@@ -517,8 +515,6 @@ def run_epoch(
             kl_balance_alpha=config.kl_balance_alpha,
             kl_free_nats_mech=config.kl_free_nats_mech,
             kl_free_nats_nuisance=config.kl_free_nats_nuisance,
-            smoothness_weight=config.smoothness_weight,
-            dt=config.dt,
             reward_weight=config.reward_weight,
             imagined_reward_weight=config.imagined_reward_weight,
         )
@@ -532,13 +528,27 @@ def run_epoch(
             grad_norm = float(nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip))
         else:
             grad_norm = compute_grad_norm(model)
-        optimizer.step()
+
+        loss_value = float(losses["total_loss"].detach())
+        step_skipped = not (math.isfinite(loss_value) and math.isfinite(grad_norm))
+        if step_skipped:
+            # A non-finite loss or gradient would poison AdamW's running
+            # moments past recovery (observed in the mechanics-phase2 /
+            # -v2 retries at step ~300, where a single bad batch
+            # eventually drove the encoder into a constant-output basin).
+            # Zero the accumulated grads and skip the weight update;
+            # keep the LR schedule advancing so wall-clock ordering of the
+            # warmup/cosine schedule is unchanged by rare skips.
+            optimizer.zero_grad(set_to_none=True)
+        else:
+            optimizer.step()
         scheduler.step()
 
         batch_metrics = tensor_metrics_to_float(losses)
         batch_metrics["grad_norm"] = grad_norm
         batch_metrics["learning_rate"] = float(scheduler.get_last_lr()[0])
         batch_metrics["nuisance_alpha"] = float(model.transition.nuisance_alpha.detach().cpu())
+        batch_metrics["step_skipped"] = float(step_skipped)
         update_totals(totals, batch_metrics)
         num_batches += 1
         global_step += 1
@@ -614,8 +624,6 @@ def evaluate(
             kl_balance_alpha=config.kl_balance_alpha,
             kl_free_nats_mech=config.kl_free_nats_mech,
             kl_free_nats_nuisance=config.kl_free_nats_nuisance,
-            smoothness_weight=config.smoothness_weight,
-            dt=config.dt,
             reward_weight=config.reward_weight,
             imagined_reward_weight=config.imagined_reward_weight,
         )
@@ -813,8 +821,6 @@ def validate_config(config: MechanicsTrainConfig) -> None:
         raise ValueError("imagination_horizon must be >= 0")
     if config.imagination_context_steps < 1:
         raise ValueError("imagination_context_steps must be >= 1")
-    if config.smoothness_weight < 0.0:
-        raise ValueError("smoothness_weight must be >= 0")
     imagination_enabled = (
         config.imagination_reconstruction_weight > 0.0
         or config.foreground_imagination_reconstruction_weight > 0.0
@@ -907,7 +913,6 @@ def print_run_summary(
     table.add_row("with_dissipation", str(config.with_dissipation))
     table.add_row("dt", f"{config.dt:.4f}")
     table.add_row("imagination_horizon", str(config.imagination_horizon))
-    table.add_row("smoothness_weight", str(config.smoothness_weight))
     console.print(table)
 
 

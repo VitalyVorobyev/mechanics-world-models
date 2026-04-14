@@ -124,6 +124,7 @@ class MechanicsWorldModel(nn.Module):
         self.encoder = FactoredEncoder(
             q_dim=q_dim,
             nuisance_dim=nuisance_dim,
+            dt=dt,
             embedding_size=embedding_size,
             head_hidden_size=encoder_head_hidden_size,
             mech_min_std=mech_min_std,
@@ -451,26 +452,39 @@ class MechanicsWorldModel(nn.Module):
 
     def initial_posterior(
         self,
-        observation: torch.Tensor,
+        observations: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return ``(q_0, qdot_0, z_0)`` posterior means for a single frame.
+        """Return ``(q_last, qdot_last, z_last)`` posterior means from a buffer.
 
-        Used by the online MPC loop. We return means (not samples) so
-        replanning at the same timestep is deterministic.
+        Requires ``T >= 2`` consecutive frames — the encoder derives ``q̇`` by
+        finite differencing, so a single frame is not enough. We return the
+        posterior at the latest frame (t = T-1), since that's the step the MPC
+        loop is about to act on.
+
+        Args:
+            observations: ``[B, T, C, H, W]`` or ``[T, C, H, W]``. ``T >= 2``.
+
+        Returns:
+            ``(q, qdot, z)`` posterior means at the last timestep.
         """
 
-        if observation.ndim == 3:
-            observation = observation.unsqueeze(0)
-        if observation.ndim != 4 or observation.shape[1] != self.input_channels:
+        if observations.ndim == 4:
+            observations = observations.unsqueeze(0)
+        if observations.ndim != 5 or observations.shape[2] != self.input_channels:
             raise ValueError(
-                f"observation must have shape [B, C={self.input_channels}, H, W]; "
-                f"got {tuple(observation.shape)}",
+                f"observations must have shape [B, T, C={self.input_channels}, H, W] "
+                f"or [T, C, H, W]; got {tuple(observations.shape)}",
             )
-        posterior = self.encoder(observation.unsqueeze(1))
+        if observations.shape[1] < 2:
+            raise ValueError(
+                "initial_posterior requires T >= 2 frames so qdot can be "
+                f"derived by finite differencing; got T={observations.shape[1]}",
+            )
+        posterior = self.encoder(observations)
         return (
-            posterior.q_mean.squeeze(1),
-            posterior.qdot_mean.squeeze(1),
-            posterior.z_mean.squeeze(1),
+            posterior.q_mean[:, -1],
+            posterior.qdot_mean[:, -1],
+            posterior.z_mean[:, -1],
         )
 
     def posterior_step(
@@ -478,15 +492,21 @@ class MechanicsWorldModel(nn.Module):
         q_prev: torch.Tensor,
         qdot_prev: torch.Tensor,
         z_prev: torch.Tensor,
-        observation: torch.Tensor,
+        observations: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Online MPC helper: feed the next observation to refresh the posterior.
+        """Online MPC helper: refresh the posterior from a ``(prev, new)`` pair.
 
-        Unlike RSSM, the factored encoder is per-frame and independent of the
-        previous latent, so we just re-encode the new frame. ``q_prev`` and
-        friends are accepted and ignored so the call signature stays
-        parallel to ``VisualWorldModel.posterior_step``.
+        Unlike the per-frame encoder we had before the finite-diff constraint,
+        the encoder now needs two consecutive frames to produce a velocity.
+        ``observations`` must therefore be ``[B, 2, C, H, W]`` — the caller
+        (CEM/MPC loop) is responsible for buffering the previous frame
+        alongside the new one.
+
+        ``q_prev``, ``qdot_prev``, ``z_prev`` are accepted for API parity with
+        ``VisualWorldModel.posterior_step`` but ignored — the encoder is
+        deterministic given the two buffered frames, so previous state carries
+        no extra information here.
         """
 
-        del q_prev, qdot_prev, z_prev  # unused; encoder is memoryless per frame
-        return self.initial_posterior(observation)
+        del q_prev, qdot_prev, z_prev  # unused; encoder state lives in the obs buffer
+        return self.initial_posterior(observations)

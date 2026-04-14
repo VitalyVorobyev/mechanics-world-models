@@ -89,9 +89,18 @@ def test_backward_populates_gradients_across_branches() -> None:
 
 def test_initial_posterior_shape_matches() -> None:
     model = _make_model(nuisance_dim=4)
-    frame = torch.rand(2, 3, 84, 84)
-    q0, qdot0, z0 = model.initial_posterior(frame)
+    # Finite-diff q̇ requires two consecutive frames to derive velocity.
+    frames = torch.rand(2, 2, 3, 84, 84)
+    q0, qdot0, z0 = model.initial_posterior(frames)
     assert q0.shape == (2, 2) and qdot0.shape == (2, 2) and z0.shape == (2, 4)
+
+
+def test_initial_posterior_requires_two_frames() -> None:
+    import pytest
+
+    model = _make_model(nuisance_dim=4)
+    with pytest.raises(ValueError, match="T >= 2"):
+        model.initial_posterior(torch.rand(2, 1, 3, 84, 84))
 
 
 def test_imagine_rollout_features_differentiable() -> None:

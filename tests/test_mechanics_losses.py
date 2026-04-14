@@ -1,4 +1,4 @@
-"""Tests for the mechanics world-model composite loss + factored KL + smoothness."""
+"""Tests for the mechanics world-model composite loss + factored KL."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from models.mechanics import (
     MechanicsWorldModel,
     compute_factored_kl,
     compute_mechanics_world_model_loss,
-    compute_qdot_smoothness_loss,
+    derive_qdot_from_q,
 )
 
 
@@ -32,28 +32,32 @@ def _make_model(reward_head: bool = False) -> MechanicsWorldModel:
     )
 
 
-def test_smoothness_loss_zero_on_perfect_finite_difference() -> None:
-    dt = 0.05
-    torch.manual_seed(1)
-    q = torch.cumsum(dt * torch.randn(3, 8, 2), dim=1)
-    # Set qdot at midpoint to exactly the finite difference of q
-    qdot_mid = (q[:, 1:] - q[:, :-1]) / dt  # [B, T-1, d]
-    # We need qdot[:, t] such that 0.5*(qdot[t+1]+qdot[t]) == qdot_mid[t].
-    # Choose qdot[0] = qdot_mid[0] and iterate: qdot[t+1] = 2*qdot_mid[t] - qdot[t].
-    qdot = torch.zeros_like(q)
-    qdot[:, 0] = qdot_mid[:, 0]
-    for t in range(qdot_mid.shape[1]):
-        qdot[:, t + 1] = 2.0 * qdot_mid[:, t] - qdot[:, t]
-    loss = compute_qdot_smoothness_loss(q, qdot, dt=dt)
-    assert loss.item() < 1e-10
+def test_derive_qdot_central_difference_on_linear_trajectory() -> None:
+    """For q_t = slope * t, central diff returns exactly the slope."""
+
+    dt = 0.01
+    slope = torch.tensor([[[0.4, -0.2]]])  # [1, 1, d]
+    t = torch.arange(10, dtype=torch.float32).view(1, -1, 1)  # [1, T, 1]
+    q_mean = slope * t * dt  # [1, T, d]
+    q_std = torch.full_like(q_mean, 0.1)
+    qdot_mean, qdot_std = derive_qdot_from_q(q_mean, q_std, dt=dt)
+    assert qdot_mean.shape == q_mean.shape
+    # Interior: slope exactly. Boundary: also exact for a linear signal.
+    expected = slope.expand_as(qdot_mean)
+    torch.testing.assert_close(qdot_mean, expected, atol=1e-5, rtol=0)
+    # Variance pushforward sanity: interior std = sqrt(2) * q_std / (2*dt).
+    expected_interior = (q_std[:, 0, :].pow(2) + q_std[:, 0, :].pow(2)).sqrt() / (2.0 * dt)
+    torch.testing.assert_close(qdot_std[:, 1:-1, :], expected_interior.unsqueeze(1).expand_as(qdot_std[:, 1:-1, :]), atol=1e-5, rtol=0)
 
 
-def test_smoothness_loss_positive_when_qdot_uncorrelated_with_q() -> None:
-    torch.manual_seed(2)
-    q = torch.randn(2, 6, 2)
-    qdot = torch.randn(2, 6, 2)
-    loss = compute_qdot_smoothness_loss(q, qdot, dt=0.05)
-    assert loss.item() > 0
+def test_derive_qdot_requires_at_least_two_frames() -> None:
+    with pytest.raises(ValueError, match="T >= 2"):
+        derive_qdot_from_q(torch.zeros(1, 1, 2), torch.ones(1, 1, 2), dt=0.01)
+
+
+def test_derive_qdot_rejects_nonpositive_dt() -> None:
+    with pytest.raises(ValueError, match="dt"):
+        derive_qdot_from_q(torch.zeros(1, 5, 2), torch.ones(1, 5, 2), dt=0.0)
 
 
 def test_factored_kl_sums_to_total() -> None:
@@ -135,10 +139,8 @@ def test_mechanics_loss_full_composite_shapes() -> None:
         kl_weight=1.0,
         kl_free_nats_mech=0.5,
         kl_free_nats_nuisance=3.0,
-        smoothness_weight=0.1,
         reward_weight=0.5,
         imagined_reward_weight=0.2,
-        dt=model.dt,
     )
     for key in (
         "total_loss",
@@ -150,7 +152,6 @@ def test_mechanics_loss_full_composite_shapes() -> None:
         "kl_q_loss",
         "kl_qdot_loss",
         "kl_z_loss",
-        "smoothness_loss",
         "reward_loss",
         "imagined_reward_loss",
     ):

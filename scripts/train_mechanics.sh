@@ -1,0 +1,14 @@
+.venv/bin/train-mechanics \
+    --dataset-dir data/cartpole-swingup-random-100k \
+    --checkpoint-dir checkpoints/mechanics-phase3-finitediff \
+    --sequence-length 32 --batch-size 32 --epochs 10 \
+    --q-dim 2 --nuisance-dim 4 --dt 0.01 \
+    --imagination-context-steps 4 --imagination-horizon 12 \
+    --foreground-imagination-reconstruction-weight 2.0 \
+    --kl-weight 0.1 \
+    --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
+    --nuisance-min-std 1.0 \
+    --learning-rate 1e-4 --warmup-steps 2000 \
+    --log-every-steps 10 \
+    --val-open-loop-every-steps 100 \
+    --val-open-loop-warmup 4 --val-open-loop-horizons 1,5,10,20

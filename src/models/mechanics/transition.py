@@ -50,6 +50,7 @@ class MechanicsTransition(nn.Module):
         dt: float,
         n_substeps: int = 1,
         prior_min_std: float = 0.05,
+        prior_min_std_qdot: float | None = None,
         nuisance_prior_min_std: float = 0.1,
         nuisance_alpha_init: float = 0.95,
     ) -> None:
@@ -65,6 +66,14 @@ class MechanicsTransition(nn.Module):
         self.dt = dt
         self.n_substeps = n_substeps
         self.prior_min_std = prior_min_std
+        # The qdot posterior is derived from q via finite differencing, so its
+        # pushforward std scales as ``q_std / dt``. Default the qdot prior std
+        # floor to the same scale so KL(posterior || prior) is bounded at init
+        # even when q_std sits at ``prior_min_std``. Callers can override to
+        # override this auto-scaling when dt is unusual.
+        self.prior_min_std_qdot = (
+            prior_min_std / dt if prior_min_std_qdot is None else prior_min_std_qdot
+        )
         self.nuisance_prior_min_std = nuisance_prior_min_std
         # Per-coordinate learnable log-stds (held in raw_std via softplus) so
         # the KL terms each branch contributes stay coordinate-scaled.
@@ -79,7 +88,7 @@ class MechanicsTransition(nn.Module):
         """Return ``(q_std, qdot_std, z_std)`` as ``[d]`` / ``[k]`` tensors."""
 
         q_std = F.softplus(self.q_raw_std) + self.prior_min_std
-        qdot_std = F.softplus(self.qdot_raw_std) + self.prior_min_std
+        qdot_std = F.softplus(self.qdot_raw_std) + self.prior_min_std_qdot
         z_std = F.softplus(self.z_raw_std) + self.nuisance_prior_min_std
         return q_std, qdot_std, z_std
 

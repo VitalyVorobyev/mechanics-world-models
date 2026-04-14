@@ -2,15 +2,14 @@
 
 Reuses the tensor-level helpers from ``models.losses`` (foreground mask,
 diagonal Gaussian KL) but wires them to the factored ``(q, qdot, z)``
-distribution instead of a single flat ``z``. Key differences vs the RSSM
-loss:
+distribution instead of a single flat ``z``.
 
-* Three independent KL terms (``q``, ``qdot``, ``z``) with their own
-  free-nats floors — the plan calls for an asymmetric budget where the
-  mechanics branch is tighter than the nuisance branch.
-* Smoothness prior on ``qdot``: the encoder's ``qdot`` head should equal the
-  finite-difference of the ``q`` head so the factorization actually *means*
-  generalized coordinate and its time derivative.
+Three independent KL terms (``q``, ``qdot``, ``z``) with their own free-nats
+floors, since the plan asks for an asymmetric budget where the mechanics
+branch is tighter than the nuisance branch. ``q̇`` is derived from ``q`` by
+finite differencing inside the encoder (see ``encoder.derive_qdot_from_q``),
+so no explicit smoothness regularizer is needed — the kinematic constraint
+is hard-wired by construction.
 """
 
 from __future__ import annotations
@@ -41,18 +40,13 @@ def compute_mechanics_world_model_loss(
     kl_balance_alpha: float = 0.8,
     kl_free_nats_mech: float = 0.5,
     kl_free_nats_nuisance: float = 3.0,
-    smoothness_weight: float = 0.0,
-    dt: float,
     reward_weight: float = 0.0,
     imagined_reward_weight: float = 0.0,
 ) -> dict[str, torch.Tensor]:
     """Compute the mechanics world-model composite loss.
 
     Gradients flow through ``total_loss``; every other entry is either a
-    weighted or a diagnostic tensor. ``dt`` is required because the
-    smoothness prior uses it to compare the encoder's ``qdot`` head to the
-    finite-difference of the ``q`` head; passing the model's ``dt`` keeps
-    the two consistent.
+    weighted or a diagnostic tensor.
     """
 
     rollout = outputs.rollout
@@ -109,13 +103,6 @@ def compute_mechanics_world_model_loss(
     kl_loss = kl_parts["kl_loss"]
     weighted_kl_loss = kl_weight * kl_loss
 
-    smoothness_loss = compute_qdot_smoothness_loss(
-        q_mean=posterior.q_mean,
-        qdot_mean=posterior.qdot_mean,
-        dt=dt,
-    )
-    weighted_smoothness_loss = smoothness_weight * smoothness_loss
-
     reward_loss, imagined_reward_loss = _reward_losses(
         outputs=outputs,
         rewards=rewards,
@@ -132,7 +119,6 @@ def compute_mechanics_world_model_loss(
         + weighted_imagination_loss
         + weighted_foreground_imagination_loss
         + weighted_kl_loss
-        + weighted_smoothness_loss
         + weighted_reward_loss
         + weighted_imagined_reward_loss
     )
@@ -151,8 +137,6 @@ def compute_mechanics_world_model_loss(
         ),
         "kl_loss": kl_loss,
         "weighted_kl_loss": weighted_kl_loss,
-        "smoothness_loss": smoothness_loss,
-        "weighted_smoothness_loss": weighted_smoothness_loss,
         "reward_loss": reward_loss,
         "weighted_reward_loss": weighted_reward_loss,
         "imagined_reward_loss": imagined_reward_loss,
@@ -214,6 +198,20 @@ def compute_factored_kl(
         free_nats=kl_free_nats_nuisance,
     )
     kl_loss = q_parts["kl_loss"] + qdot_parts["kl_loss"] + z_parts["kl_loss"]
+    # Diagnostic scalars for triaging the z-channel phase transition observed
+    # at step ~300 (see docs/current_status.md). Split kl_z by the t=0 anchor
+    # term (N(0, sigma_p) initial prior) vs the AR(1) transition terms
+    # (t>=1); track posterior/prior magnitudes so we can tell whether the
+    # encoder's z_mean drifts gradually (story A: weak-prior / over-capacity)
+    # or crosses a threshold in a single window (story B: optimizer-side).
+    diagnostics = _factored_kl_diagnostics(
+        posterior_q_mean=posterior_q_mean,
+        posterior_qdot_mean=posterior_qdot_mean,
+        posterior_z_mean=posterior_z_mean,
+        posterior_z_std=posterior_z_std,
+        prior_z_mean=prior_z_mean,
+        prior_z_std=prior_z_std,
+    )
     return {
         "kl_loss": kl_loss,
         "kl_q_loss": q_parts["kl_loss"],
@@ -225,31 +223,49 @@ def compute_factored_kl(
         "kl_q_free_nats_active": q_parts["kl_free_nats_active"],
         "kl_qdot_free_nats_active": qdot_parts["kl_free_nats_active"],
         "kl_z_free_nats_active": z_parts["kl_free_nats_active"],
+        **diagnostics,
     }
 
 
-def compute_qdot_smoothness_loss(
-    q_mean: torch.Tensor,
-    qdot_mean: torch.Tensor,
-    dt: float,
-) -> torch.Tensor:
-    """Finite-difference smoothness prior on the encoder's qdot head.
+def _factored_kl_diagnostics(
+    posterior_q_mean: torch.Tensor,
+    posterior_qdot_mean: torch.Tensor,
+    posterior_z_mean: torch.Tensor,
+    posterior_z_std: torch.Tensor,
+    prior_z_mean: torch.Tensor,
+    prior_z_std: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Return scalar diagnostic tensors for triaging the z-channel blow-up.
 
-    ``qdot_t`` should equal ``(q_{t+1} - q_t) / dt`` — the single most
-    informative regularizer against state collapse, because it forces the
-    encoder's two mechanics heads into a derivative relationship the
-    Lagrangian step expects. The loss is averaged over ``B * (T-1) * d``.
+    All computed under ``no_grad``. The returned tensors are 0-d so they pass
+    cleanly through ``tensor_metrics_to_float`` in the trainer and land as
+    single float columns in ``history.jsonl`` without schema surgery.
     """
 
-    if q_mean.shape != qdot_mean.shape:
-        raise ValueError("q and qdot tensors must share shape")
-    if q_mean.shape[1] < 2:
-        return q_mean.new_zeros(())
-    if dt <= 0.0:
-        raise ValueError("dt must be > 0")
-    finite_diff = (q_mean[:, 1:] - q_mean[:, :-1]) / dt
-    midpoint = 0.5 * (qdot_mean[:, 1:] + qdot_mean[:, :-1])
-    return F.mse_loss(midpoint, finite_diff.detach())
+    with torch.no_grad():
+        z_kl_per_step = diagonal_gaussian_kl(
+            mean_q=posterior_z_mean,
+            std_q=posterior_z_std,
+            mean_p=prior_z_mean,
+            std_p=prior_z_std,
+        )  # [B, T]
+        kl_z_t0_mean = z_kl_per_step[:, 0].mean()
+        if z_kl_per_step.shape[1] > 1:
+            kl_z_transition_mean = z_kl_per_step[:, 1:].mean()
+        else:
+            kl_z_transition_mean = torch.zeros_like(kl_z_t0_mean)
+        return {
+            "kl_z_t0_mean": kl_z_t0_mean,
+            "kl_z_transition_mean": kl_z_transition_mean,
+            "z_post_mean_abs_max": posterior_z_mean.abs().max(),
+            "z_post_mean_rms": posterior_z_mean.pow(2).mean().sqrt(),
+            "z_post_std_max": posterior_z_std.max(),
+            "z_post_std_min": posterior_z_std.min(),
+            "z_prior_mean_abs_max": prior_z_mean.abs().max(),
+            "z_prior_std_min": prior_z_std.min(),
+            "q_post_mean_abs_max": posterior_q_mean.abs().max(),
+            "qdot_post_mean_abs_max": posterior_qdot_mean.abs().max(),
+        }
 
 
 def _balanced_kl(

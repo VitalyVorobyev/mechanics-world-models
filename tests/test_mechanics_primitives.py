@@ -49,8 +49,8 @@ def test_mass_matrix_is_positive_definite_and_symmetric() -> None:
     # Positive-definite: all eigenvalues > 0.
     eigvals = torch.linalg.eigvalsh(m)
     assert (eigvals > 0).all()
-    # Lower bound from epsilon ridge.
-    assert (eigvals.min(dim=-1).values > 0.99e-3).all()
+    # Lower bound from epsilon ridge (default eps=1e-2 caps ||M^-1|| at ~100).
+    assert (eigvals.min(dim=-1).values > 0.99e-2).all()
 
 
 def test_mass_matrix_supports_leading_time_axis() -> None:
@@ -62,7 +62,13 @@ def test_mass_matrix_supports_leading_time_axis() -> None:
 
 
 def test_dissipation_gradient_matches_linear_damping_when_c_is_constant() -> None:
-    """If we freeze the damping network, dD/d(qdot) must equal C qdot."""
+    """If we freeze the damping network, dD/d(qdot) must equal C qdot in the
+    linear-damping regime (``|qdot| << input_scale``).
+
+    The default ``input_scale=20`` saturates large qdots via tanh; the test
+    uses small qdots where the tanh is essentially identity, so the Rayleigh
+    gradient reduces to the linear damping form as expected.
+    """
 
     torch.manual_seed(42)
     dissipation = Dissipation(q_dim=2, hidden_size=16, hidden_layers=1)
@@ -73,7 +79,7 @@ def test_dissipation_gradient_matches_linear_damping_when_c_is_constant() -> Non
     with torch.no_grad():
         last.weight.zero_()
         # Keep bias random so the PSD matrix is non-trivial.
-    qdot = torch.randn(5, 2, requires_grad=True)
+    qdot = 0.01 * torch.randn(5, 2, requires_grad=True)
     d = dissipation(qdot).sum()
     (grad,) = torch.autograd.grad(d, qdot)
     c = dissipation.damping_matrix(qdot)
@@ -89,6 +95,41 @@ def test_forward_acceleration_shapes() -> None:
     acc = forward_acceleration(dyn, q, qdot, u)
     assert acc.shape == (4, 2)
     assert torch.isfinite(acc).all()
+
+
+def test_forward_acceleration_bounded_under_extreme_inputs() -> None:
+    """Regression for the cold-start blow-up: huge encoder outputs must not
+    produce huge ``q_ddot`` or huge parameter gradients.
+
+    Before F2 (tanh-squashed MLP inputs) and F3 (larger mass ridge), a single
+    tail-of-distribution encoder sample could push ``q_ddot`` into O(1e6)
+    territory, and the resulting KL / smoothness gradients poisoned AdamW's
+    moment estimates. This test pins the fix: for q, qdot up to 1000× the
+    physical scale, ``q_ddot`` stays bounded and gradients on the dynamics
+    modules stay finite under ``.backward()``.
+    """
+
+    dyn = _make_dynamics(q_dim=2, action_dim=1)
+    # Inputs 200× beyond ``input_scale`` — well into tanh saturation.
+    q = 1000.0 * torch.randn(4, 2)
+    qdot = 1000.0 * torch.randn(4, 2)
+    u = 5.0 * torch.randn(4, 1)
+    acc = forward_acceleration(dyn, q, qdot, u)
+    assert acc.shape == (4, 2)
+    assert torch.isfinite(acc).all()
+    # MLP outputs on a bounded input domain have bounded magnitude; the
+    # mass ridge (eps=1e-2) caps ||M^-1|| ~ 100, and the bounded qdot caps
+    # the kinetic / momentum quadratics. Actual values are well under 1e4
+    # at init; we pick 1e4 as a generous ceiling that still catches a
+    # regression to the unbounded behaviour.
+    assert acc.abs().max().item() < 1e4, f"q_ddot.abs().max()={acc.abs().max().item():.4g}"
+    acc.pow(2).sum().backward()
+    for module in (dyn.mass_matrix, dyn.potential, dyn.dissipation, dyn.actuation):
+        for p in module.parameters():
+            if p.grad is not None:
+                assert torch.isfinite(p.grad).all(), (
+                    f"non-finite grad on {type(module).__name__}"
+                )
 
 
 def test_forward_acceleration_differentiable_through_parameters() -> None:

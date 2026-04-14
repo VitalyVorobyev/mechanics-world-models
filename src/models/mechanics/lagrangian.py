@@ -39,12 +39,38 @@ def _mlp(
     return nn.Sequential(*layers)
 
 
+def _bounded_input(x: torch.Tensor, scale: float) -> torch.Tensor:
+    """Smoothly bound MLP inputs to ``|x| <= scale`` via ``scale * tanh(x/scale)``.
+
+    At cold start the encoder's ``q`` / ``qdot`` are unbounded linear-head
+    outputs; the dynamics MLPs (mass, potential, dissipation, actuation) are
+    untrained SiLU stacks. A tail-of-distribution sample then drives an
+    unbounded activation pattern, gradients explode, and AdamW's second-moment
+    estimates get poisoned — see ``docs/current_status.md`` for the observed
+    trace. Squashing each MLP input with ``tanh`` keeps the dynamics-network
+    domain compact independent of the encoder's scale, without changing the
+    Euler-Lagrange form (the transformation is a smooth, invertible change of
+    generalized coordinate on any bounded region of state space — cartpole's
+    physical state is bounded, so nothing physical is lost).
+
+    The gradient wrt the raw input is scaled by ``sech^2(x/scale)/scale``, so
+    it saturates to zero for ``|x| >> scale``: pathological encoder outputs
+    simply stop propagating gradient into the dynamics network.
+    """
+
+    return scale * torch.tanh(x / scale)
+
+
 class MassMatrix(nn.Module):
     """Positive-definite mass matrix ``M(q)`` via Cholesky parameterization.
 
     Outputs ``M(q) = L(q) L(q)^T + eps * I`` where ``L`` is lower-triangular
     with ``softplus``-activated diagonal; this guarantees symmetric PD
     regardless of weight values so downstream ``linalg.solve`` never blows up.
+    The default ridge ``eps=1e-2`` caps ``||M^{-1}||`` at roughly 100, which
+    is enough headroom for expressiveness on a rigid-body cartpole while
+    preventing the cold-start blow-up observed when the smaller ``eps=1e-3``
+    ridge allowed ``||M^{-1}||`` to reach ~1000.
     """
 
     def __init__(
@@ -52,11 +78,15 @@ class MassMatrix(nn.Module):
         q_dim: int,
         hidden_size: int = 64,
         hidden_layers: int = 2,
-        eps: float = 1e-3,
+        eps: float = 1e-2,
+        input_scale: float = 5.0,
     ) -> None:
         super().__init__()
+        if input_scale <= 0.0:
+            raise ValueError("input_scale must be > 0")
         self.q_dim = q_dim
         self.eps = eps
+        self.input_scale = input_scale
         n_tri = q_dim * (q_dim + 1) // 2
         # ``_tri_indices`` and ``_diag_mask`` are deterministic constants of
         # ``q_dim`` but we register them as buffers so ``model.to(device)``
@@ -81,7 +111,8 @@ class MassMatrix(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        flat = q.reshape(-1, self.q_dim)
+        q_bounded = _bounded_input(q, self.input_scale)
+        flat = q_bounded.reshape(-1, self.q_dim)
         raw = self.net(flat)
         activated = torch.where(self._diag_mask, F.softplus(raw) + self.eps, raw)
         lower = q.new_zeros(flat.shape[0], self.q_dim, self.q_dim)
@@ -100,9 +131,13 @@ class Potential(nn.Module):
         q_dim: int,
         hidden_size: int = 64,
         hidden_layers: int = 2,
+        input_scale: float = 5.0,
     ) -> None:
         super().__init__()
+        if input_scale <= 0.0:
+            raise ValueError("input_scale must be > 0")
         self.q_dim = q_dim
+        self.input_scale = input_scale
         self.net = _mlp(
             input_size=q_dim,
             output_size=1,
@@ -116,7 +151,8 @@ class Potential(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        flat = q.reshape(-1, self.q_dim)
+        q_bounded = _bounded_input(q, self.input_scale)
+        flat = q_bounded.reshape(-1, self.q_dim)
         return self.net(flat).reshape(*batch_shape)
 
 
@@ -135,10 +171,14 @@ class Dissipation(nn.Module):
         hidden_size: int = 64,
         hidden_layers: int = 2,
         eps: float = 1e-4,
+        input_scale: float = 20.0,
     ) -> None:
         super().__init__()
+        if input_scale <= 0.0:
+            raise ValueError("input_scale must be > 0")
         self.q_dim = q_dim
         self.eps = eps
+        self.input_scale = input_scale
         n_tri = q_dim * (q_dim + 1) // 2
         # Same buffer-vs-attribute reasoning as in ``MassMatrix`` — these
         # tensors travel with the module on ``model.to(device)``.
@@ -160,7 +200,8 @@ class Dissipation(nn.Module):
         if qdot.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {qdot.shape[-1]}")
         batch_shape = qdot.shape[:-1]
-        flat = qdot.reshape(-1, self.q_dim)
+        qdot_bounded = _bounded_input(qdot, self.input_scale)
+        flat = qdot_bounded.reshape(-1, self.q_dim)
         raw = self.net(flat)
         activated = torch.where(self._diag_mask, F.softplus(raw) + self.eps, raw)
         lower = qdot.new_zeros(flat.shape[0], self.q_dim, self.q_dim)
@@ -169,10 +210,17 @@ class Dissipation(nn.Module):
         return c.reshape(*batch_shape, self.q_dim, self.q_dim)
 
     def forward(self, qdot: torch.Tensor) -> torch.Tensor:
-        """Return scalar dissipation ``D(qdot) = 0.5 qdot^T C(qdot) qdot``."""
+        """Return scalar dissipation ``D(qdot) = 0.5 qdot^T C(qdot) qdot``.
 
+        The quadratic form uses ``qdot`` bounded by ``input_scale`` so the
+        Rayleigh functional cannot blow up on tail samples. ``dD/dqdot`` still
+        resembles linear damping for ``|qdot| << input_scale``; outside that
+        regime the saturation keeps the gradient bounded.
+        """
+
+        qdot_bounded = _bounded_input(qdot, self.input_scale)
         c = self.damping_matrix(qdot)
-        return 0.5 * torch.einsum("...i,...ij,...j->...", qdot, c, qdot)
+        return 0.5 * torch.einsum("...i,...ij,...j->...", qdot_bounded, c, qdot_bounded)
 
 
 class Actuation(nn.Module):
@@ -187,10 +235,14 @@ class Actuation(nn.Module):
         action_dim: int,
         hidden_size: int = 64,
         hidden_layers: int = 2,
+        input_scale: float = 5.0,
     ) -> None:
         super().__init__()
+        if input_scale <= 0.0:
+            raise ValueError("input_scale must be > 0")
         self.q_dim = q_dim
         self.action_dim = action_dim
+        self.input_scale = input_scale
         self.net = _mlp(
             input_size=q_dim,
             output_size=q_dim * action_dim,
@@ -204,7 +256,8 @@ class Actuation(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        flat = q.reshape(-1, self.q_dim)
+        q_bounded = _bounded_input(q, self.input_scale)
+        flat = q_bounded.reshape(-1, self.q_dim)
         raw = self.net(flat)
         return raw.reshape(*batch_shape, self.q_dim, self.action_dim)
 
@@ -269,10 +322,16 @@ def forward_acceleration(
         # calls still function (e.g. during eval-mode imagination or CEM).
         q_in = q if q.requires_grad else q.clone().requires_grad_(True)
         qdot_ref = qdot.detach()  # holding qdot fixed when differentiating wrt q
+        # F2: bound the qdot used in the kinetic / momentum / M_dot quadratic
+        # forms. M, V, B all bound their own inputs; we still need to cap the
+        # outer ``qdot^T M qdot``-style quadratics so a pathological encoder
+        # output can't blow up q_ddot even when every MLP is well-behaved.
+        qdot_bound = dynamics.dissipation.input_scale if dynamics.dissipation is not None else 20.0
+        qdot_b = _bounded_input(qdot_ref, qdot_bound)
 
         mass = dynamics.mass_matrix(q_in)  # [..., d, d]
         potential = dynamics.potential(q_in)  # [...]
-        kinetic = 0.5 * torch.einsum("...i,...ij,...j->...", qdot_ref, mass, qdot_ref)
+        kinetic = 0.5 * torch.einsum("...i,...ij,...j->...", qdot_b, mass, qdot_b)
         lagrangian_sum = (kinetic - potential).sum()
         (dL_dq,) = torch.autograd.grad(
             lagrangian_sum,
@@ -282,7 +341,7 @@ def forward_acceleration(
         )
 
         q_dim = q_in.shape[-1]
-        momentum = torch.einsum("...ij,...j->...i", mass, qdot_ref)  # [..., d]
+        momentum = torch.einsum("...ij,...j->...i", mass, qdot_b)  # [..., d]
         m_dot_qdot_components: list[torch.Tensor] = []
         for i in range(q_dim):
             is_last = i == q_dim - 1
@@ -292,7 +351,7 @@ def forward_acceleration(
                 create_graph=needs_outer_grad,
                 retain_graph=not is_last or needs_outer_grad,
             )
-            m_dot_qdot_components.append((grad_component * qdot).sum(dim=-1))
+            m_dot_qdot_components.append((grad_component * qdot_b).sum(dim=-1))
         m_dot_qdot = torch.stack(m_dot_qdot_components, dim=-1)
 
         if dynamics.dissipation is not None:

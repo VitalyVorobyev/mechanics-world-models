@@ -124,8 +124,6 @@ def benchmark(
             next_observations=nxt,
             foreground_imagination_reconstruction_weight=2.0,
             foreground_reconstruction_weight=1.0,
-            smoothness_weight=1.0,
-            dt=model.dt,
         )
         losses["total_loss"].backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -162,8 +160,6 @@ def benchmark(
                 next_observations=nxt,
                 foreground_imagination_reconstruction_weight=2.0,
                 foreground_reconstruction_weight=1.0,
-                smoothness_weight=1.0,
-                dt=model.dt,
             )
         with _timed(device, backward_times):
             optimizer.zero_grad(set_to_none=True)
