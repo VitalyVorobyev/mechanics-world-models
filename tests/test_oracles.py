@@ -411,3 +411,36 @@ def test_pose_calibration_removes_pose_dependent_bias() -> None:
     episodes.observed_qpos = episodes.qpos + bias
     corrected = PoseCalibration(theta_bins=48).fit(episodes).apply(episodes)
     assert np.abs(corrected.observed_qpos - episodes.qpos).mean() < 0.3 * np.abs(bias).mean()
+
+
+def test_heuristic_poses_read_rendered_frames() -> None:
+    pytest.importorskip("dm_control")
+    from oracles.bootstrap import heuristic_poses
+    from oracles.pixel_pose import render_states
+
+    qpos = np.array([[0.3, math.pi], [-0.5, 0.4], [0.0, -1.2]])
+    poses, found = heuristic_poses(render_states(qpos, None))
+    assert found.all()
+    assert np.abs(poses[:, 0] - qpos[:, 0]).max() < 0.06
+    assert np.abs(np.angle(np.exp(1j * (poses[:, 1] - qpos[:, 1])))).max() < math.radians(5)
+
+
+def test_reject_jumps_flags_spikes() -> None:
+    from oracles.common import reject_jumps
+
+    episodes = _synthetic_episodes(1, 200, 1.0, 0)
+    rng = np.random.default_rng(0)
+    episodes.observed_qpos = episodes.qpos + 0.002 * rng.normal(size=episodes.qpos.shape)
+    episodes.observed_qpos[0, 100, 1] += 0.3
+    valid = reject_jumps(episodes).valid
+    assert not valid[0, 100] and valid[0, 50] and valid.mean() > 0.9
+
+
+def test_reject_jumps_scale_floor_handles_quantized_poses() -> None:
+    from oracles.common import reject_jumps
+
+    episodes = _synthetic_episodes(1, 200, 1.0, 0)
+    episodes.observed_qpos = episodes.qpos.copy()
+    episodes.observed_qpos[0, :, 0] = 0.01 * (np.arange(201) // 7)  # cart moving in pixel-sized steps
+    assert reject_jumps(episodes, 6.0).valid.mean() < 0.5  # MAD collapses to zero: every step is a "jump"
+    assert reject_jumps(episodes, 6.0, (0.004, 0.012)).valid.mean() > 0.95

@@ -25,7 +25,7 @@ Last full review: 2026-10-18.
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
 | A-DEC-1 | A Linear→deconv decoder can render the cartpole from a 2–3 number pose | refined: renders from true pose; end-to-end failure is joint learning |
-| A-FE-1 | Keypoint encoder + geometric renderer learn the pose end to end | open (renderer OK; tip keypoint weak) |
+| A-FE-1 | Keypoint encoder + geometric renderer learn the pose end to end | open: gradient training cannot find θ (flat loss beyond ~10°); render-and-compare search through a fitted renderer reaches 0.5° median; label-free bootstrap untested |
 | A-ENC-1 | A per-frame CNN can regress `(x, cos θ, sin θ)` from 84×84 pixels | supported for visible, non-upright poses (0.1–0.4 px); fails on upright (rare) and out-of-view frames (37%) |
 | A-ROUTE-1 | In `concat` mode the pose goes into `q`, not `z` | refuted |
 | A-DT-1 | Model `dt` equals the frame interval | refuted for the April runs, fixed |
@@ -760,6 +760,101 @@ Last full review: 2026-10-18.
       Model the observation noise explicitly (a filtering posterior with
       a learned noise model) rather than treating poses as clean.
 
+- **Bias-removal result (2026-10-19):** the prediction's alternative
+  holds, so chart bias is **not** the limiting factor.
+  - Keypoint, debiased: true-start ratio 1.19 / 1.29 (k1 / k5), `shoot`
+    1.14 / 1.20. Before debiasing: 1.26 / 1.27 and 1.21 / 1.20.
+  - Conv, debiased: 0.76 / 0.84, and the Lagrangian's pretraining is NaN
+    again for one seed (seed 1).
+  - Per the written rule, the residual is the problem. One concrete,
+    cheap-to-test mechanism comes before a full noise model:
+    - rare large errors (1–3% of frames above 1 px; θ errors of 10° and
+      more) become velocity spikes through finite differences;
+    - the Lagrangian's training is destabilized by start velocities far
+      outside the physical range (conv: NaN twice, nominal error 2–3× the
+      MLP's).
+- **Outlier rejection (prediction written 2026-10-19, before running):**
+  - Change: a frame is invalid when its pose second difference exceeds
+    6× the robust (MAD) scale of second differences in that episode, per
+    coordinate (`--reject-jumps 6`). Observable, no labels.
+  - Runs: keypoint and conv encoders, central velocities, `shoot` with 8
+    frames, seeds 0–2.
+  - Prediction:
+    - the conv Lagrangian no longer diverges, and its nominal h20 error
+      falls to within 1.5× the MLP's;
+    - the keypoint ratio reaches ≥ 1.3 (about 45%).
+  - Decision rule:
+    - *≥ 1.3:* rare outliers were the limit; the pixel pipeline needs
+      outlier rejection or robust losses.
+    - *Otherwise:* build the explicit noise model (a filtering posterior
+      with a learned, correlated observation noise).
+
+- **Outlier-rejection result (2026-10-19, `--reject-jumps 6`, seeds
+  0–2):**
+
+  | encoder | nominal h20 lag / mlp | true-start ratio k1 / k5 | `shoot` ratio k1 / k5 (per seed, k1) | `shoot` floor |
+  |---|---|---|---|---|
+  | conv | 0.022 / 0.021 (was 0.05 / NaN vs 0.024) | 1.73 ± 0.82 / 1.73 ± 0.21 | 1.50 ± 0.52 / 1.58 ± 0.17 (1.09, 1.19, 2.23) | 0.0096 (was 0.040) |
+  | keypoint | 0.035 / 0.038 | 1.13 / 1.26 | 1.08 / 1.17 | 0.028 |
+
+  - Rejection removes 2–6% of training windows (conv 41.3k left of 43.9k).
+  - Against the predictions:
+    - conv Lagrangian stable, with nominal within 1.5× of the MLP:
+      **confirmed**. It is now level with the MLP.
+    - keypoint ratio ≥ 1.3: **refuted**.
+  - Decision (written rule): for conv, rare outliers were the limit, and
+    with rejection it passes on the mean (`shoot` k1 1.50, k5 1.58; every
+    seed ≥ 1.38 at k5, k1 seed-dependent). For keypoint they were not.
+    Its errors are uniformly larger (median 0.7°, smooth bias 0.46 px),
+    which puts it near the 0.8 px Gaussian regime.
+  - Front-end requirements so far:
+    - typical error near 0.1–0.2 px (conv-level);
+    - outlier rejection, or a robust loss;
+    - a model-based start state.
+    With all three, the advantage survives a real pixel front end at
+    about 1.5×, against 3.8× on true state.
+
+- **Heavy-tailed noise, a synthetic mechanism test (prediction written
+  2026-10-19, before running):**
+  - Mechanism: the Lagrangian's Coriolis and centrifugal terms are
+    quadratic in q̇ and unbounded, while the MLP's q̇ input is
+    tanh-saturated. A velocity spike from a pose outlier therefore pulls
+    the Lagrangian's fit much harder. Small Gaussian noise does not, which
+    is why the Lagrangian was robust there.
+  - Setup: the 0.08 px Gaussian run (σx 0.0033 m, σθ 0.17°) plus 2% of
+    frames with heavy errors (σx 0.1 m, σθ 10°)
+    (`--pose-outliers 0.02 0.1 10`). Central velocities, `shoot` with 8
+    frames, seeds 0–2. Compare with the same run without outliers
+    (nominal 0.014 / 0.014, ratio 2.15).
+  - Prediction: the Lagrangian's nominal h20 at least doubles (to ≥ 0.03)
+    while the MLP's grows less than 1.5×, and the ratio falls below 1.3.
+  - Decision rule:
+    - *Confirmed:* heavy tails specifically break the structured model.
+      Robust training (outlier rejection, Huber loss, or bounded
+      velocity features in the Coriolis terms) is a requirement, and the
+      rejection test above shows whether it is enough.
+    - *Refuted:* outliers alone do not explain the real-front-end
+      failure. Look at clipped frames and correlated errors next.
+- **Heavy-tail result (2026-10-19, seeds 0–2):** mostly **confirmed**.
+  - Nominal h20 without and with 2% outliers: Lagrangian 0.014 → 0.075
+    (5.4×); MLP 0.014 → 0.035 (2.5×, against a predicted < 1.5×).
+  - Ratios: true start 0.89 ± 0.13, `shoot` 0.86 ± 0.10 (k1), against
+    2.15 and 1.91 without outliers.
+  - So heavy tails hurt both forms and the Lagrangian about twice as much,
+    consistent with unbounded q̇² terms amplifying velocity spikes.
+    Together with the conv-encoder rejection result, robust handling of
+    outliers is a requirement for the structured model.
+  - Not yet tested: whether bounded velocity features in the Coriolis
+    term, or a Huber loss, make the Lagrangian itself robust without
+    rejecting frames.
+- **Heuristic front end with rejection (2026-10-19):** the first attempt
+  rejected 80% of frames and crashed on an empty adaptation set. The
+  heuristic's cart column is pixel-quantized, so most second differences
+  are exactly zero and the MAD scale collapses. Re-running with a floor
+  on the scale (`--jump-min-scale 0.004 0.012`, about one frame of
+  physical acceleration), which keeps 71% of frames against 77% before
+  rejection.
+
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**
   - Setup: as the context oracle, but the five training environments vary
@@ -1041,6 +1136,116 @@ Last full review: 2026-10-18.
     frozen renderer per frame, then use the result as a pseudo-label for
     the encoder (analysis by synthesis, still label-free). The search
     alone is being tested now (scratchpad `render_search.py`).
+- **Render-and-compare result (2026-10-19, scratchpad
+  `render_search.py`, 1010 held-out frames, 173 s on MPS):** works.
+  - Search: x on a 0.05 m grid with 8 coarse angles, then θ on a 5° grid
+    at that x, then a local 7×7 refinement. No encoder is involved.
+
+    | frames | θ median | θ rms | x rms |
+    |---|---|---|---|
+    | in view, all | 0.54° | 1.07° | 0.33 px |
+    | in view, hanging | 0.53° | | |
+    | in view, sideways | 0.51° | | |
+    | in view, upright | 0.96° | | |
+    | out of view (median) | 1.8° | | |
+
+    2% of frames are flipped, mostly out-of-view ones.
+  - That is better than both supervised encoders, especially on upright
+    poses (0.96° here, 4.4° keypoint, 17° conv).
+  - **Caveat:** the frozen renderer was fitted on true poses (rung 1).
+    This shows the reconstruction likelihood has the right global
+    minimum and that search finds it. It does not yet show a label-free
+    front end.
+  - Next for A-FE-1:
+    - a label-free bootstrap that alternates render-and-compare pose
+      search with renderer fitting on the searched poses (EM), starting
+      from the renderer's analytic geometry;
+    - amortize the search into an encoder trained on the searched poses,
+      because search costs 0.17 s per frame.
+- **Label-free bootstrap (prediction written 2026-10-19, before running;
+  `scripts/oracles/bootstrap_oracle.py`):**
+  - Step 0, classical CV with no labels:
+    - background = per-pixel median over many frames (the camera is
+      fixed);
+    - foreground = pixels far from the background;
+    - cart column = median foreground column in the cart's row band;
+    - θ = direction from the pivot to the centroid of the foreground
+      pixels outside that band.
+    - Scene knowledge used: the pivot row, and 25.35 px/m for reporting
+      x in metres. No pose labels.
+  - Steps 1–3, EM:
+    - fit the geometric renderer on the current poses;
+    - re-estimate the poses of a training subset by render-and-compare;
+    - repeat twice.
+  - Score: held-out in-view frames, poses by search through the final
+    renderer.
+  - Prediction:
+    - the step-0 heuristic reaches a median θ error ≤ 3° in view, worse
+      for upright and hanging poses where the pole crosses the cart band;
+    - after EM the median is ≤ 1° and the rms ≤ 3°, close to the
+      true-pose renderer's 0.54° / 1.07°.
+  - Decision rule:
+    - *EM ≤ 1° median:* a label-free front end with supervised-level
+      accuracy exists. Amortize it (encoder on searched poses) and run
+      the encoder-pose context oracle with it.
+    - *Heuristic good, EM no better:* the heuristic alone is the front
+      end.
+    - *Both poor:* back to keypoint losses.
+- **Step-0 heuristic result (2026-10-19, 1010 held-out frames):**
+  confirmed, and better than predicted. A pose is found in 79% of frames
+  (the rest have the cart out of view). On in-view frames:
+
+  | | heuristic, no labels | supervised keypoint encoder | supervised conv encoder |
+  |---|---|---|---|
+  | θ median | 1.24° | 0.71° | 0.21° |
+  | θ rms | 1.87° | 1.55° | 3.7° |
+  | upright, median | 2.2° | 4.4° | 17° |
+  | x rms | 0.60 px | 0.48 px | 0.67 px |
+
+  The heuristic is a colour mask plus moments, with no learning, and it
+  already matches the supervised keypoint encoder.
+- **EM result (2026-10-19, `runs/oracles/bootstrap_oracle/20261019-004002.json`,
+  two iterations on 3000 frames, 31 min on MPS):** "heuristic good, EM no
+  better".
+  - EM search on in-view frames: θ median 1.27°, rms 1.86°, x rms 0.60 px.
+    Sideways rms improves (1.05° vs 13° for the heuristic where it
+    misfires), and every frame gets a pose.
+  - Median accuracy does not improve. A renderer fitted on heuristic
+    poses learns the heuristic's systematic bias, and EM converges to
+    it. With a renderer fitted on true poses, search reached 0.54°.
+  - Per the rule, the heuristic (or EM, for coverage) is the label-free
+    front end. Getting below 1° needs an independent constraint on the
+    bias, such as the dynamics themselves (joint fitting) or a known
+    object dimension.
+- **Heuristic front end in the context oracle (prediction written
+  2026-10-19, before running):**
+  - Setup: every training and shift frame is rendered and read by the
+    heuristic (`--front-end heuristic`). Valid frames are those where the
+    heuristic finds the system, about 76–79%, an observable criterion.
+    Central velocities, `shoot` with 8 frames, seeds 0–2.
+  - Prediction: the ratio falls between the keypoint encoder's (1.2) and
+    the 0.25 px Gaussian result (1.67). The heuristic's errors are
+    moment biases where the pole is clipped or crosses the cart band,
+    again smooth in the pose. Estimate: about 1.3 (50%).
+  - Decision rule: *≥ 1.3*: a fully label-free pixel pipeline (heuristic
+    poses, then structured dynamics with model-based start states)
+    preserves H1b on cartpole. *< 1.3*: same diagnosis path as the
+    encoders (bias removal).
+- **Heuristic front-end result (2026-10-19):** **refuted, badly.**
+  - Nominal h20: Lagrangian 0.079 / 0.166 / 0.082 (seeds 0–2), MLP about
+    0.054.
+  - True-start ratio 0.54 ± 0.12 and `shoot` 0.57. The true-dynamics
+    `shoot` floor (0.026) is similar to the encoders' floors.
+  - Here valid means "found" (76–81% of frames). That includes partly
+    clipped frames, where the heuristic's error is larger (median 5° out
+    of view).
+  - Pattern across all real front ends: the Lagrangian's nominal fit
+    degrades much more than the MLP's (keypoint 0.035 vs 0.037, conv
+    0.05 vs 0.024, heuristic 0.08–0.17 vs 0.054). Under Gaussian noise of
+    a similar rms it was the *more* robust of the two (0.018 vs 0.050 at
+    0.25 px). So something non-Gaussian in real pose errors breaks the
+    structured model. The outlier-rejection test addresses this, and it
+    is now also run on the heuristic poses.
 
 ### A-ENC-1 — CNN regresses the state
 - **Status:** supported for x; partial for θ.

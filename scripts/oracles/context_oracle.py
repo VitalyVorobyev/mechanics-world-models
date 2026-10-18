@@ -69,7 +69,19 @@ def main() -> None:
         "--encoder", type=Path, default=None,
         help="pose encoder saved by encoder_oracle.py --save: train/adapt on poses read from rendered frames",
     )
+    parser.add_argument(
+        "--front-end", choices=("heuristic",), default=None,
+        help="label-free poses from rendered frames (colour mask + moments); valid = where it finds the system",
+    )
     parser.add_argument("--encoder-device", default="mps")
+    parser.add_argument(
+        "--reject-jumps", type=float, default=None, metavar="FACTOR",
+        help="with --encoder/--front-end: invalidate frames whose pose second difference exceeds FACTOR x MAD",
+    )
+    parser.add_argument(
+        "--jump-min-scale", type=float, nargs=2, default=None, metavar=("X_M", "THETA_RAD"),
+        help="floor for the --reject-jumps scale (needed for pixel-quantized front ends)",
+    )
     parser.add_argument(
         "--debias", action="store_true",
         help="with --encoder: remove the encoder's per-pose median error, fitted on the nominal training "
@@ -81,6 +93,10 @@ def main() -> None:
     parser.add_argument(
         "--potential-slot", action="store_true",
         help="4-number contexts; the Lagrangian's 4th slot scales the potential (for gravity shifts)",
+    )
+    parser.add_argument(
+        "--pose-outliers", type=float, nargs=3, default=[0.0, 0.0, 0.0], metavar=("FRACTION", "SIGMA_X_M", "SIGMA_THETA_DEG"),
+        help="with --pose-noise: add heavy errors to this fraction of frames",
     )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
@@ -136,12 +152,31 @@ def main() -> None:
             shifted = {name: tuple(calibration.apply(e) for e in parts) for name, parts in shifted.items()}
             pose_source += ":debiased"
         print(f"poses from {args.encoder} ({pose_source})", flush=True)
+    if args.front_end == "heuristic":
+        from oracles.pixel_pose import with_heuristic_poses
+
+        pose_source = "heuristic:v1"
+        train_envs = {
+            name: with_heuristic_poses(e, None if m == 1.0 else {args.param: m})
+            for (name, e), m in zip(train_envs.items(), args.train_scales)
+        }
+        shifted = {name: tuple(with_heuristic_poses(e, shift_scales.get(name)) for e in parts) for name, parts in shifted.items()}
+        print("poses from the label-free heuristic front end", flush=True)
+    if args.reject_jumps is not None and pose_source is not None:
+        from oracles.common import reject_jumps
+
+        floor = tuple(args.jump_min_scale) if args.jump_min_scale else None
+        train_envs = {name: reject_jumps(e, args.reject_jumps, floor) for name, e in train_envs.items()}
+        shifted = {name: tuple(reject_jumps(e, args.reject_jumps, floor) for e in parts) for name, parts in shifted.items()}
+        pose_source += f":jumps{args.reject_jumps:g}" + (f":floor{floor[0]:g},{floor[1]:g}" if floor else "")
     result = run_context_oracle(
         train_envs, nominal_val, shifted, ks=args.ks, pretrain_steps=args.pretrain_steps, seed=args.seed,
         modes=args.modes, pose_noise=(args.pose_noise[0], math.radians(args.pose_noise[1])),
         shift_scales=shift_scales or None, start_context=args.start_context,
         train_velocity=args.train_velocity, pose_source=pose_source,
-        potential_slot=args.potential_slot, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
+        potential_slot=args.potential_slot,
+        pose_outliers=(args.pose_outliers[0], args.pose_outliers[1], math.radians(args.pose_outliers[2])),
+        cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
     path = result.write()
     print(result.summary())

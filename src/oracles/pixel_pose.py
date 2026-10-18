@@ -53,6 +53,26 @@ def with_encoder_poses(
     )
 
 
+
+def with_heuristic_poses(episodes: StateEpisodes, scales: dict[str, float] | None) -> StateEpisodes:
+    """Render and read poses with the label-free CV heuristic (``oracles.bootstrap``).
+
+    ``valid`` is where the heuristic found the cart and pole, an observable
+    criterion (no ground truth).
+    """
+
+    from oracles.bootstrap import heuristic_poses
+
+    e, t = episodes.qpos.shape[:2]
+    poses, found = heuristic_poses(render_states(episodes.qpos.reshape(-1, 2), scales))
+    poses, found = poses.reshape(e, t, 2), found.reshape(e, t)
+    poses[..., 1] = np.unwrap(poses[..., 1], axis=1)
+    return StateEpisodes(
+        qpos=episodes.qpos, qvel=episodes.qvel, actions=episodes.actions, frame_dt=episodes.frame_dt,
+        observed_qpos=poses, valid=found,
+    )
+
+
 class PoseCalibration:
     """Oracle calibration: the encoder's median pose error per (theta, x) bin, fitted on true poses.
 

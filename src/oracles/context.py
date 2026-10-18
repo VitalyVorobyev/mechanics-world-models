@@ -378,6 +378,7 @@ def run_context_oracle(
     train_velocity: str = "central",
     pose_source: str | None = None,
     potential_slot: bool = False,
+    pose_outliers: tuple[float, float, float] = (0.0, 0.0, 0.0),
     cache_dir: Path | None = None,
     log=print,
 ) -> OracleResult:
@@ -435,6 +436,9 @@ def run_context_oracle(
     if noisy:  # only then, so earlier caches keep their hashes
         config["pose_noise"] = list(pose_noise)
         pretrain_keys += ("pose_noise",)
+        if pose_outliers[0] > 0:
+            config["pose_outliers"] = list(pose_outliers)
+            pretrain_keys += ("pose_outliers",)
         if pose_source is not None:
             config["pose_source"] = pose_source
             pretrain_keys += ("pose_source",)
@@ -445,7 +449,9 @@ def run_context_oracle(
     def observe(episodes: StateEpisodes, salt: int, velocity: str = train_velocity) -> StateEpisodes:
         if not noisy:
             return episodes
-        return noisy_observation(episodes, *pose_noise, seed=10_000 * seed + salt, velocity=velocity)
+        return noisy_observation(
+            episodes, *pose_noise, seed=10_000 * seed + salt, velocity=velocity, outliers=pose_outliers,
+        )
 
     cache = _Cache(cache_dir, config, {"oracle": "context", **{k: config[k] for k in pretrain_keys}})
     if noisy and start_context > 0:  # evaluation-only: added after hashing so finished cells are reused

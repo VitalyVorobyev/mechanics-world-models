@@ -1,6 +1,65 @@
 # Current Status and Open Problem
 
-## Latest (2026-10-18, night): H1b supported on true state, for parameter extrapolation
+## Latest (2026-10-19, overnight): H1b generalizes across parameters; real pose front ends are the bottleneck
+
+Details, predictions written before each run, and tables are in
+[`hypotheses.md`](hypotheses.md#h1b--few-shot-adaptation-current-focus).
+
+- **Second and third parameters (true state):**
+  - Actuator gear: the same pattern as cart mass. Parity inside the
+    trained range, and the advantage over the context MLP grows outside
+    it (×2: 1.8×, ×3: 4.0×).
+  - Gravity without a matching slot: the Lagrangian is 2–3× *worse*,
+    even inside the range.
+  - Gravity with a potential-scale slot: up to 5× better. The four-slot
+    model (inertia, actuation, potential) keeps the mass result.
+  - So the claim needs its qualifier: **structure extrapolates where the
+    shifted parameter has a matching slot, and hurts where it does not.**
+- **Surprise 1 explained:** the mass and gain slots are a near-gauge.
+  Their ratio matches the true inertia ratio within 3%; only the split
+  is arbitrary.
+- **Pose noise (simulated):**
+  - Finite-difference start velocities make noise dominate at once: a
+    two-frame start is useless already at 0.08 px.
+  - A model-based start state (shooting through the model over 8–16
+    context frames) restores the advantage: ratio 1.67 at 0.25 px.
+  - At 0.8 px, training itself fails unless training velocities are
+    smoothed; with smoothing, 1.54.
+- **Real pose front ends (pixels in, poses out, then the context
+  oracle):**
+  - Supervised keypoint and conv encoders, and a label-free colour/moment
+    heuristic, all read typical in-view poses at about 0.1–0.6 px.
+  - But the Lagrangian's advantage does not survive them: ratio 1.2
+    (keypoint), 0.75 (conv), 0.54 (heuristic). With real errors the
+    Lagrangian's nominal fit degrades far more than the MLP's, the
+    reverse of the Gaussian case.
+  - Removing the smooth per-pose bias does not help. Outlier rejection
+    and a synthetic heavy-tail test are running to check the leading
+    explanation (q̇² Coriolis terms amplify velocity spikes).
+- **The camera does not see the system in 35% of frames** (A-VIEW-1).
+  The cart is out of view in 26%, since the frame spans ±1.66 m and the
+  rail ±1.8 m. Every pixel model trained on this data was asked to
+  predict invisible states.
+- **Self-supervised front end (A-FE-1):**
+  - Gradient training through even a perfect, frozen renderer cannot
+    find the pole angle: the loss is flat beyond about 10°.
+  - Render-and-compare search finds it: 0.5° median with a renderer
+    fitted on true poses.
+  - Label-free, a classical colour-mask and moments heuristic gives
+    1.24° median, about as good as the supervised keypoint encoder. EM
+    on top does not reduce the bias.
+- **Infrastructure:**
+  - noisy-pose, start-state, encoder-pose, heuristic front-end,
+    frozen-renderer and bootstrap oracles;
+  - `--param` for gear and gravity;
+  - fixed a result-file collision between parallel seeds and a
+    zero-sigma weighting bug in the shooting estimator.
+- **Next:** decide from the outlier tests whether robust training is
+  enough for real front ends. If it is not, build an explicit
+  observation-noise model (a filtering posterior) before any end-to-end
+  pixel training.
+
+## Earlier (2026-10-18, night): H1b supported on true state, for parameter extrapolation
 
 Details, predictions and tables are in
 [`hypotheses.md`](hypotheses.md#h1b--few-shot-adaptation-current-focus).

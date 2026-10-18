@@ -214,6 +214,7 @@ def pose_features(qpos: np.ndarray) -> np.ndarray:
 
 def noisy_observation(
     episodes: StateEpisodes, sigma_x: float, sigma_theta: float, seed: int, *, velocity: str = "backward",
+    outliers: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> StateEpisodes:
     """What a pose encoder would see: Gaussian pose noise, velocity by finite differences.
 
@@ -224,11 +225,16 @@ def noisy_observation(
     open-loop start state; forward difference at frame 0), or ``"savgol"``
     (non-causal Savitzky–Golay slope over 9 frames, about 5× less noise
     than ``"central"``; central differences within 4 frames of the ends).
+    ``outliers = (fraction, sigma_x, sigma_theta)`` adds heavy errors to that
+    fraction of frames (a heavy-tailed front end).
     """
 
     rng = np.random.default_rng(seed)
     base = episodes.qpos if episodes.observed_qpos is None else episodes.observed_qpos
     qpos = base + rng.normal(size=base.shape) * np.array([sigma_x, sigma_theta])
+    if outliers[0] > 0:
+        hit = rng.random(base.shape[:2]) < outliers[0]
+        qpos = qpos + hit[..., None] * rng.normal(size=base.shape) * np.array(outliers[1:])
     dt = episodes.frame_dt
     qvel = np.empty_like(qpos)
     if velocity == "backward":
@@ -247,6 +253,33 @@ def noisy_observation(
     else:
         raise ValueError(f"unknown velocity stencil {velocity!r}")
     return StateEpisodes(qpos=qpos, qvel=qvel, actions=episodes.actions, frame_dt=dt, valid=episodes.valid)
+
+
+def reject_jumps(
+    episodes: StateEpisodes, factor: float = 6.0, min_scale: tuple[float, float] | None = None,
+) -> StateEpisodes:
+    """Mark frames invalid where the observed pose jumps: |second difference| > factor × MAD scale.
+
+    Uses only the observed poses (``observed_qpos``, else ``qpos``), so it is
+    an observable outlier test. The scale is per episode and coordinate.
+    ``min_scale`` floors it: a pixel-quantized front end has mostly zero
+    second differences, so its MAD collapses and everything looks like a jump.
+    """
+
+    q = episodes.qpos if episodes.observed_qpos is None else episodes.observed_qpos
+    second = np.zeros_like(q)
+    second[:, 1:-1] = q[:, 2:] - 2 * q[:, 1:-1] + q[:, :-2]
+    centred = np.abs(second[:, 1:-1] - np.median(second[:, 1:-1], axis=1, keepdims=True))
+    scale = 1.4826 * np.median(centred, axis=1, keepdims=True) + 1e-9  # [E, 1, 2]
+    if min_scale is not None:
+        scale = np.maximum(scale, np.asarray(min_scale))
+    jump = (np.abs(second) > factor * scale).any(axis=-1)
+    jump[:, 1:-1] |= jump[:, 2:] | jump[:, :-2]  # a spike shows in its neighbours' differences too
+    valid = ~jump if episodes.valid is None else episodes.valid & ~jump
+    return StateEpisodes(
+        qpos=episodes.qpos, qvel=episodes.qvel, actions=episodes.actions, frame_dt=episodes.frame_dt,
+        observed_qpos=episodes.observed_qpos, valid=valid,
+    )
 
 
 def load_shift_splits(dataset_dir: Path, seed: int = 0) -> tuple[StateEpisodes, StateEpisodes, StateEpisodes]:
