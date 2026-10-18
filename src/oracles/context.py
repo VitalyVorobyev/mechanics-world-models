@@ -41,7 +41,9 @@ from models.mechanics.lagrangian import (
     MLPDynamics,
     Potential,
 )
-from oracles.common import Criterion, OracleResult, StateEpisodes
+from oracles.ceiling import TrueAcceleration, integrate
+from oracles.common import Criterion, OracleResult, StateEpisodes, noisy_observation, pose_features
+from oracles.start_state import context_windows, evaluate_starts
 from oracles.dynamics import (
     _Cache,
     _pose,
@@ -197,8 +199,14 @@ class _Adapted(nn.Module):
         return self.model.rollout(q, qdot, actions)
 
 
-def _multi_env_windows(envs: Sequence[StateEpisodes], horizon: int, rail_margin: float | None):
-    parts = [_windows(e, horizon, rail_margin=rail_margin) for e in envs]
+def _multi_env_windows(
+    envs: Sequence[StateEpisodes], horizon: int, rail_margin: float | None,
+    references: Sequence[StateEpisodes] | None = None,
+):
+    references = references or envs
+    parts = [
+        _windows(e, horizon, rail_margin=rail_margin, rail_reference=r.qpos) for e, r in zip(envs, references)
+    ]
     env_index = torch.cat([torch.full((p[0].shape[0],), i, dtype=torch.long) for i, p in enumerate(parts)])
     return tuple(torch.cat([p[j] for p in parts]) for j in range(4)) + (env_index,)
 
@@ -225,7 +233,10 @@ def pretrain(
     return float(loss.detach())
 
 
-def _adapt_grid(base, mode, data, select, test, *, lrs, checkpoints, horizons, select_horizon, batch_size, seed):
+def _adapt_grid(
+    base, mode, data, select, test, *, lrs, checkpoints, horizons, select_horizon, batch_size, seed,
+    test_noisy=None,
+):
     from oracles.dynamics import fit
 
     grid: dict[str, dict] = {}
@@ -238,12 +249,88 @@ def _adapt_grid(base, mode, data, select, test, *, lrs, checkpoints, horizons, s
                 "select": windows_error(view, select, (select_horizon,))[select_horizon],
                 "test": {str(h): e for h, e in windows_error(view, test, horizons).items()},
             }
+            if test_noisy is not None:
+                grid[f"{lr:g}@{step}"]["test_noisy"] = {
+                    str(h): e for h, e in windows_error(view, test_noisy, horizons).items()
+                }
 
         fit(
             view, data, adapted.adaptation_parameters(mode), steps=max(checkpoints), lr=lr,
             batch_size=batch_size, seed=seed, checkpoints=checkpoints, on_checkpoint=record,
         )
     return grid
+
+
+def _torch_rollout(model: ContextDynamics):
+    def rollout(q0: np.ndarray, v0: np.ndarray, actions: np.ndarray) -> np.ndarray:
+        as_t = lambda a: torch.as_tensor(a, dtype=torch.float32)  # noqa: E731
+        with torch.enable_grad():  # the Lagrangian step uses autograd internally
+            return model.rollout(as_t(q0), as_t(v0), as_t(actions)).detach().double().numpy()
+
+    return rollout
+
+
+def _true_rollout(accel: TrueAcceleration, frame_dt: float):
+    return lambda q0, v0, actions: integrate(accel, q0, v0, actions, frame_dt, 4)
+
+
+def _start_state_eval(
+    models, per_shift, recipes, metrics, cache, *, observe, ks, modes, segment_length, train_horizon,
+    rail_margin, eval_horizons, eval_stride, batch_size, seed, start_context, pose_noise, shift_scales,
+    frame_dt, log,
+) -> None:
+    """Re-adapt each selected recipe (deterministic) and score start-state estimators."""
+
+    from oracles.dynamics import fit
+
+    horizons = tuple(eval_horizons)
+    for shift_name, (shift_train, observed_train, segments, shift_test, salt) in per_shift.items():
+        windows = context_windows(
+            shift_test, observe(shift_test, salt + 2, velocity="backward"), horizon=max(horizons),
+            context=start_context, stride=eval_stride, rail_margin=rail_margin,
+        )
+        if shift_scales is not None and shift_name in shift_scales:
+            key = f"starts{start_context}v2.{shift_name}.floor_true"
+            if key not in cache.cells:
+                accel = TrueAcceleration(shift_scales[shift_name])
+                cache.save_cell(key, evaluate_starts(_true_rollout(accel, frame_dt), windows, horizons, sigma=pose_noise))
+                accel.close()
+            for name, value in cache.cells[key].items():
+                metrics[f"{shift_name}.start_floor.{name}"] = value
+        for k in ks:
+            adapt_data = _windows(
+                _subset(observed_train, segments[:k], segment_length), train_horizon, rail_margin=rail_margin,
+                rail_reference=_subset(shift_train, segments[:k], segment_length).qpos,
+            )
+            for mode in modes:
+                key = f"starts{start_context}v2.{shift_name}.k{k}.{mode}"
+                if key not in cache.cells:
+                    start = time.time()
+                    form = "lagrangian" if mode.startswith("lag") else "mlp"
+                    adapted = copy.deepcopy(models[form])
+                    lr, steps = recipes[mode].split("@")
+                    if int(steps) > 0:
+                        fit(
+                            _Adapted(adapted), adapt_data, adapted.adaptation_parameters(mode), steps=int(steps),
+                            lr=float(lr), batch_size=batch_size, seed=seed + k,
+                        )
+                    cache.save_cell(
+                        key, evaluate_starts(_torch_rollout(adapted), windows, horizons, sigma=pose_noise),
+                    )
+                    h = 20 if 20 in horizons else horizons[-1]
+                    shoot = cache.cells[key][f"shoot.dev_h{h}"]
+                    log(f"start-state {shift_name}.k{k}.{mode}: shoot h{h} {shoot:.4f} ({time.time() - start:.0f}s)")
+                for name, value in cache.cells[key].items():
+                    metrics[f"{shift_name}.k{k}.{mode}.start.{name}"] = value
+    if "lag_ctx" in modes and "mlp_ctx" in modes:
+        h = 20 if 20 in horizons else horizons[-1]
+        for k in ks:
+            for name in ("true_start", "backward", "quadfit", "shoot"):
+                ratios = [
+                    metrics[f"{s}.k{k}.mlp_ctx.start.{name}.dev_h{h}"] / max(metrics[f"{s}.k{k}.lag_ctx.start.{name}.dev_h{h}"], 1e-9)
+                    for s in per_shift
+                ]
+                metrics[f"start_ratio.{name}_k{k}_h{h}"] = float(np.mean(ratios))
 
 
 def run_context_oracle(
@@ -266,10 +353,28 @@ def run_context_oracle(
     rail_margin: float | None = 0.2,
     seed: int = 0,
     modes: Sequence[str] = CONTEXT_MODES,
+    pose_noise: tuple[float, float] = (0.0, 0.0),
+    shift_scales: dict[str, dict[str, float] | None] | None = None,
+    start_context: int = 0,
+    train_velocity: str = "central",
     cache_dir: Path | None = None,
     log=print,
 ) -> OracleResult:
-    """Train both forms across ``train_envs`` (first = nominal), adapt a context to each shift."""
+    """Train both forms across ``train_envs`` (first = nominal), adapt a context to each shift.
+
+    With ``pose_noise = (sigma_x, sigma_theta)`` nonzero, every window the
+    models train, adapt or select on is built from noisy poses with
+    finite-difference velocities (``noisy_observation``; ``train_velocity``,
+    default central differences, the mechanics model's training stencil). Test errors are reported twice: from the true
+    start state (``.dev_h*``, dynamics quality) and from a noisy start state
+    with a backward-difference velocity (``.noisy_start.dev_h*``, the
+    mechanics model's open-loop start), both against true poses. ``shift_scales`` (physics
+    scales per shift) adds the true-dynamics floor on the same windows.
+    ``start_context > 0`` (noisy runs only) re-adapts each mode's selected
+    recipe and compares start-state estimators that use that many context
+    frames (``oracles.start_state``), with the true-dynamics floor for each:
+    ``{shift}.k{k}.{mode}.start.{estimator}.dev_h*``.
+    """
 
     env_names = list(train_envs)
     config = {
@@ -295,13 +400,29 @@ def run_context_oracle(
         "shifts": list(shifted),
         "frame_dt": nominal_val.frame_dt,
     }
+    noisy = any(s > 0 for s in pose_noise)
     pretrain_keys = (
         "train_envs", "train_episodes", "train_horizon", "pretrain_steps", "batch_size", "lr", "n_substeps",
         "rail_margin", "actuated_dims", "seed", "frame_dt",
     )
+    if noisy:  # only then, so earlier caches keep their hashes
+        config["pose_noise"] = list(pose_noise)
+        pretrain_keys += ("pose_noise",)
+        if train_velocity != "central":
+            config["train_velocity"] = train_velocity
+            pretrain_keys += ("train_velocity",)
+
+    def observe(episodes: StateEpisodes, salt: int, velocity: str = train_velocity) -> StateEpisodes:
+        if not noisy:
+            return episodes
+        return noisy_observation(episodes, *pose_noise, seed=10_000 * seed + salt, velocity=velocity)
+
     cache = _Cache(cache_dir, config, {"oracle": "context", **{k: config[k] for k in pretrain_keys}})
+    if noisy and start_context > 0:  # evaluation-only: added after hashing so finished cells are reused
+        config["start_context"] = start_context
     metrics: dict[str, float] = {}
-    data = _multi_env_windows(list(train_envs.values()), train_horizon, rail_margin)
+    observed_envs = [observe(e, i) for i, e in enumerate(train_envs.values())]
+    data = _multi_env_windows(observed_envs, train_horizon, rail_margin, references=list(train_envs.values()))
     nominal_eval = _windows(nominal_val, max(eval_horizons), stride=eval_stride, rail_margin=rail_margin)
     log(f"train: {data[0].shape[0]} windows over {len(env_names)} environments {env_names}")
     models: dict[str, ContextDynamics] = {}
@@ -326,19 +447,50 @@ def run_context_oracle(
         )
 
     cells_total = len(shifted) * len(ks) * len(modes)
-    for shift_name, (shift_train, shift_select, shift_test) in shifted.items():
-        select = _windows(shift_select, select_horizon, stride=eval_stride, rail_margin=rail_margin)
+    per_shift: dict[str, tuple] = {}
+    for index, (shift_name, (shift_train, shift_select, shift_test)) in enumerate(shifted.items()):
+        salt = 100 * (index + 1)
+        observed_train = observe(shift_train, salt)
+        observed_select = observe(shift_select, salt + 1)
+        select = _windows(
+            observed_select, select_horizon, stride=eval_stride, rail_margin=rail_margin,
+            rail_reference=shift_select.qpos,
+        )
         test = _windows(shift_test, max(eval_horizons), stride=eval_stride, rail_margin=rail_margin)
+        test_noisy = None
+        if noisy:  # noisy start state, true targets
+            start = _windows(
+                observe(shift_test, salt + 2, velocity="backward"), max(eval_horizons), stride=eval_stride, rail_margin=rail_margin,
+                rail_reference=shift_test.qpos,
+            )
+            test_noisy = (start[0], start[1], test[2], test[3])
         for form in ("lagrangian", "mlp"):
             for h, e in windows_error(_Adapted(models[form]), test, eval_horizons).items():
                 metrics[f"{shift_name}.k0.{form}.dev_h{h}"] = e
+        if shift_scales is not None and shift_name in shift_scales:
+            accel = TrueAcceleration(shift_scales[shift_name])
+            for label, windows in (("floor_true", test), ("floor_true.noisy_start", test_noisy)):
+                if windows is None:
+                    continue
+                pred = integrate(
+                    accel, windows[0].double().numpy(), windows[1].double().numpy(), windows[2].double().numpy(),
+                    nominal_val.frame_dt, 4,
+                )
+                dev = np.abs(pose_features(pred) - pose_features(windows[3].double().numpy()))
+                for h in eval_horizons:
+                    metrics[f"{shift_name}.{label}.dev_h{h}"] = float(dev[:, h - 1].mean())
+            accel.close()
         segments = free_segments(shift_train, segment_length, rail_margin, seed)
+        per_shift[shift_name] = (shift_train, observed_train, segments, shift_test, salt)
         log(
             f"{shift_name}: zero-shot h{select_horizon} lag {metrics[f'{shift_name}.k0.lagrangian.dev_h{select_horizon}']:.4f}"
             f" mlp {metrics[f'{shift_name}.k0.mlp.dev_h{select_horizon}']:.4f}",
         )
         for k in ks:
-            adapt_data = _windows(_subset(shift_train, segments[:k], segment_length), train_horizon, rail_margin=rail_margin)
+            adapt_data = _windows(
+                _subset(observed_train, segments[:k], segment_length), train_horizon, rail_margin=rail_margin,
+                rail_reference=_subset(shift_train, segments[:k], segment_length).qpos,
+            )
             for mode in modes:
                 key = f"{shift_name}.k{k}.{mode}"
                 if key in cache.cells:
@@ -348,6 +500,7 @@ def run_context_oracle(
                 grid = _adapt_grid(
                     models[form], mode, adapt_data, select, test, lrs=adapt_lrs, checkpoints=adapt_checkpoints,
                     horizons=eval_horizons, select_horizon=select_horizon, batch_size=batch_size, seed=seed + k,
+                    test_noisy=test_noisy,
                 )
                 cache.save_cell(key, grid)
                 best = min(grid.values(), key=lambda g: g["select"])
@@ -368,9 +521,21 @@ def run_context_oracle(
                 for h in eval_horizons:
                     metrics[f"{shift_name}.k{k}.{mode}.dev_h{h}"] = grid[recipes[mode]]["test"][str(h)]
                     metrics[f"{shift_name}.k{k}.{mode}.cellbest.dev_h{h}"] = grid[cell_best]["test"][str(h)]
+                    if noisy:
+                        metrics[f"{shift_name}.k{k}.{mode}.noisy_start.dev_h{h}"] = (
+                            grid[recipes[mode]]["test_noisy"][str(h)]
+                        )
+    if noisy and start_context > 0:
+        _start_state_eval(
+            models, per_shift, recipes, metrics, cache, observe=observe, ks=ks, modes=modes,
+            segment_length=segment_length, train_horizon=train_horizon, rail_margin=rail_margin,
+            eval_horizons=eval_horizons, eval_stride=eval_stride, batch_size=batch_size, seed=seed,
+            start_context=start_context, pose_noise=pose_noise, shift_scales=shift_scales,
+            frame_dt=nominal_val.frame_dt, log=log,
+        )
     criteria = []
     for k in [k for k in (1, 5) if k in ks]:
-        for suffix in ("", ".cellbest"):
+        for suffix in ("", ".cellbest") + ((".noisy_start",) if noisy else ()):
             ratios = [
                 metrics[f"{s}.k{k}.mlp_ctx{suffix}.dev_h{select_horizon}"]
                 / max(metrics[f"{s}.k{k}.lag_ctx{suffix}.dev_h{select_horizon}"], 1e-9)

@@ -342,7 +342,21 @@ pretrained models.
 # trained on simulated cart masses {1, 0.7, 0.85, 1.2, 1.4}, tested on x0.5 / x2
 .venv/bin/python -u scripts/oracles/context_oracle.py --seed 0 \
     >> runs/oracles/logs/context_seed0.log 2>&1
+# Same, seeds 0-2 in parallel with named logs; extra flags pass through
+TAG=context_dose scripts/oracles/run_context.sh \
+    --sim-shift cart_mass_x0.4=0.4 --sim-shift cart_mass_x0.3=0.3 --ks 1 5 --modes lag_ctx mlp_ctx
+# Pose noise (pixel-encoder stand-in): sigma_x in metres, sigma_theta in degrees.
+# Trains/adapts on noisy poses with finite-difference velocities and reports
+# errors from the true and from a noisy start state, plus the true-dynamics floor.
+TAG=context_noise_0.3px scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 --pose-noise 0.01 0.5
+# Another physical parameter: actuator gear (or gravity) for training and shifts
+TAG=context_gear scripts/oracles/run_context.sh --param actuator_gear_0 --sim-shift gear_x2=2
 ```
+
+The encoder oracle reports the wrapped angle error in degrees and the
+equivalent image errors (`x_err_px_rms`, `tip_err_px_rms`; 25.35 px per metre
+on camera 0, so one pixel at the pole tip is 2.3°), comparable with the
+pose-noise levels above.
 
 The keypoint / renderer front end (`--encoder-type keypoint --decoder-type
 render`, cartpole only) and the extra losses (`--latent-dynamics-weight`,

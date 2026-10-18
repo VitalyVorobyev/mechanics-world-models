@@ -15,6 +15,8 @@ from numpy.typing import NDArray
 _BODY_MASS_RE = re.compile(r"^body_mass_(\d+)$")
 _DOF_DAMPING_RE = re.compile(r"^dof_damping_(\d+)$")
 _GEOM_SIZE_RE = re.compile(r"^geom_size_(\d+)_(\d+)$")
+_ACTUATOR_GEAR_RE = re.compile(r"^actuator_gear_(\d+)$")
+GRAVITY_KEY = "gravity"
 # Applied when the MJCF is compiled (not post-hoc), so MuJoCo recomputes the
 # pole's inertia and centre of mass. Cartpole only.
 POLE_LENGTH_KEY = "pole_length"
@@ -34,6 +36,9 @@ class PixelEnvConfig:
     * ``body_mass_<i>``: scales the body's mass *and* its inertia tensor
       (uniform density change); applied after loading.
     * ``dof_damping_<i>``: scales joint damping; applied after loading.
+    * ``actuator_gear_<i>``: scales actuator ``i``'s gear (the force per
+      unit control); applied after loading.
+    * ``gravity``: scales the gravity vector; applied after loading.
     * ``geom_size_<i>_<j>``: scales a geom size entry after compilation. This
       only changes collision and rendering — inertia and centre of mass are
       fixed at compile time — so it is **not** a length change. (Before the
@@ -69,10 +74,12 @@ class PixelEnvConfig:
                     _BODY_MASS_RE.match(key)
                     or _DOF_DAMPING_RE.match(key)
                     or _GEOM_SIZE_RE.match(key)
+                    or _ACTUATOR_GEAR_RE.match(key)
+                    or key == GRAVITY_KEY
                 ):
                     raise ValueError(
-                        f"unknown physics_param_scales key {key!r}; expected "
-                        "pole_length, body_mass_<i>, dof_damping_<i>, or geom_size_<i>_<j>",
+                        f"unknown physics_param_scales key {key!r}; expected pole_length, body_mass_<i>, "
+                        "dof_damping_<i>, actuator_gear_<i>, gravity, or geom_size_<i>_<j>",
                     )
 
 
@@ -327,10 +334,15 @@ def apply_physics_param_scales(physics: Any, scales: dict[str, float]) -> None:
             i = int(match.group(1))
             j = int(match.group(2))
             _scale_array_entry(physics.model.geom_size, (i, j), scale, key)
+        elif (match := _ACTUATOR_GEAR_RE.match(key)) is not None:
+            _scale_array_entry(physics.model.actuator_gear, (int(match.group(1)), 0), scale, key)
+        elif key == GRAVITY_KEY:
+            for axis in range(3):
+                _scale_array_entry(physics.model.opt.gravity, (axis,), scale, key)
         else:
             raise ValueError(
                 f"unknown physics scale key {key!r}; expected body_mass_<i>, "
-                "dof_damping_<i>, or geom_size_<i>_<j>",
+                "dof_damping_<i>, actuator_gear_<i>, gravity, or geom_size_<i>_<j>",
             )
 
 

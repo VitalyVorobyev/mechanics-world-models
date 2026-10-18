@@ -205,6 +205,33 @@ def test_context_oracle_runs_end_to_end(tmp_path: Path) -> None:
     assert "mlp_ctx_over_lag_ctx_ratio_k1_h20" in result.metrics
 
 
+def test_noisy_observation_uses_backward_differences() -> None:
+    from oracles.common import noisy_observation
+
+    clean = _synthetic_episodes(2, 30, 1.0, 0)
+    noisy = noisy_observation(clean, 0.01, 0.02, seed=0)
+    assert np.abs(noisy.qpos - clean.qpos).std() > 0
+    expected = (noisy.qpos[:, 5] - noisy.qpos[:, 4]) / clean.frame_dt
+    assert np.allclose(noisy.qvel[:, 5], expected)
+    assert np.array_equal(noisy.actions, clean.actions)
+
+
+def test_context_oracle_with_pose_noise_reports_noisy_start(tmp_path: Path) -> None:
+    from oracles.context import run_context_oracle
+
+    train_envs = {"nominal": _synthetic_episodes(3, 60, 1.0, 0), "light": _synthetic_episodes(3, 60, 0.7, 5)}
+    shifted = {"heavy": tuple(_synthetic_episodes(n, 60, 2.0, s) for n, s in ((3, 2), (2, 3), (2, 4)))}
+    result = run_context_oracle(
+        train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, ks=(1,), segment_length=20, train_horizon=4,
+        pretrain_steps=3, adapt_lrs=(1e-3,), adapt_checkpoints=(0, 2), batch_size=8, eval_horizons=(5, 20),
+        rail_margin=None, modes=("lag_ctx", "mlp_ctx"), pose_noise=(0.01, 0.02), cache_dir=tmp_path,
+        log=lambda _: None,
+    )
+    assert np.isfinite(result.metrics["heavy.k1.lag_ctx.noisy_start.dev_h20"])
+    assert "mlp_ctx_over_lag_ctx_ratio.noisy_start_k1_h20" in result.metrics
+    assert result.config["pose_noise"] == [0.01, 0.02]
+
+
 def test_simulated_state_episodes_have_collector_layout() -> None:
     pytest.importorskip("dm_control")
     from oracles.context import simulate_state_episodes
@@ -221,3 +248,71 @@ def test_true_mass_matrix_matches_cartpole_parameters() -> None:
     m = true_mass_matrices(np.array([[0.0, 0.0], [0.5, math.pi / 2]]))
     assert m[:, 0, 0] == pytest.approx([1.1, 1.1], rel=1e-3)  # cart 1.0 + pole 0.1
     assert abs(m[1, 0, 1]) < 1e-6 < abs(m[0, 0, 1])  # coupling ~ cos(theta)
+
+
+def test_pose_errors_wrap_angles_and_convert_to_pixels() -> None:
+    from oracles.encoder import PIXELS_PER_METRE, pose_errors
+
+    qpos = np.array([[0.0, math.pi - 0.01], [1.0, 0.0]])
+    theta = np.array([-math.pi + 0.01, 0.02])  # wraps: errors 0.02 rad each
+    pred = np.stack([qpos[:, 0] + 0.1, np.cos(theta), np.sin(theta)], axis=-1)
+    errors = pose_errors(pred, qpos)
+    assert errors["theta_err_deg_median"] == pytest.approx(math.degrees(0.02), rel=1e-6)
+    assert errors["x_err_px_rms"] == pytest.approx(0.1 * PIXELS_PER_METRE)
+    assert errors["tip_err_px_rms"] == pytest.approx(0.02 * PIXELS_PER_METRE, rel=1e-6)
+
+
+def _particle_rollout(q0: np.ndarray, v0: np.ndarray, actions: np.ndarray, dt: float = 0.02) -> np.ndarray:
+    q, v, out = q0.copy(), v0.copy(), []
+    for step in range(actions.shape[1]):
+        v = v + dt * (actions[:, step, :1] - 0.5 * q)
+        q = q + dt * v
+        out.append(q)
+    return np.stack(out, axis=1)
+
+
+def test_model_based_start_state_beats_backward_difference() -> None:
+    from oracles.common import StateEpisodes, noisy_observation
+    from oracles.start_state import context_windows, evaluate_starts
+
+    rng = np.random.default_rng(0)
+    actions = rng.uniform(-1, 1, size=(4, 80, 1))
+    q0, v0 = rng.normal(size=(4, 2)), rng.normal(size=(4, 2))
+    qpos = np.concatenate([q0[:, None], _particle_rollout(q0, v0, actions)], axis=1)
+    qvel = np.gradient(qpos, 0.02, axis=1)
+    clean = StateEpisodes(qpos=qpos, qvel=qvel, actions=actions, frame_dt=0.02)
+    noisy = noisy_observation(clean, 0.01, 0.01, seed=1)
+    windows = context_windows(clean, noisy, horizon=20, context=8, stride=5, rail_margin=None)
+    errors = evaluate_starts(_particle_rollout, windows, (20,), sigma=(0.01, 0.01))
+    assert errors["shoot.dev_h20"] < 0.5 * errors["backward.dev_h20"]
+    assert errors["quadfit.dev_h20"] < errors["backward.dev_h20"]
+
+
+def test_context_oracle_start_state_evaluation(tmp_path: Path) -> None:
+    from oracles.context import run_context_oracle
+
+    train_envs = {"nominal": _synthetic_episodes(3, 60, 1.0, 0), "light": _synthetic_episodes(3, 60, 0.7, 5)}
+    shifted = {"heavy": tuple(_synthetic_episodes(n, 60, 2.0, s) for n, s in ((3, 2), (2, 3), (2, 4)))}
+    kwargs = dict(
+        ks=(1,), segment_length=20, train_horizon=4, pretrain_steps=3, adapt_lrs=(1e-3,), adapt_checkpoints=(0, 2),
+        batch_size=8, eval_horizons=(5, 20), rail_margin=None, modes=("lag_ctx", "mlp_ctx"),
+        pose_noise=(0.01, 0.02), cache_dir=tmp_path, log=lambda _: None,
+    )
+    plain = run_context_oracle(train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, **kwargs)
+    result = run_context_oracle(train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, start_context=4, **kwargs)
+    assert np.isfinite(result.metrics["heavy.k1.lag_ctx.start.shoot.dev_h20"])
+    assert "start_ratio.shoot_k1_h20" in result.metrics
+    # Evaluation-only option: the adaptation cells are reused, so headline metrics are identical.
+    assert result.metrics["heavy.k1.lag_ctx.dev_h20"] == plain.metrics["heavy.k1.lag_ctx.dev_h20"]
+
+
+def test_savgol_velocity_is_less_noisy_than_central() -> None:
+    from oracles.common import noisy_observation
+
+    clean = _synthetic_episodes(2, 120, 1.0, 0)
+    errors = {}
+    for stencil in ("central", "savgol"):
+        observed = noisy_observation(clean, 0.01, 0.01, seed=0, velocity=stencil)
+        reference = noisy_observation(clean, 0.0, 0.0, seed=0, velocity=stencil)  # same stencil, no noise
+        errors[stencil] = (observed.qvel - reference.qvel)[:, 10:-10].std()
+    assert errors["savgol"] < 0.3 * errors["central"]

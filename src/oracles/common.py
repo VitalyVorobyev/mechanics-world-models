@@ -72,9 +72,18 @@ class OracleResult:
             "verdict": self.verdict(),
             "notes": self.notes,
         }
-        path = out_dir / f"{stamp}.json"
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n")
-        (out_dir / "latest.json").write_text(path.read_text())
+        text = json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n"
+        # Parallel seeds can finish in the same second: never overwrite an existing result.
+        suffix = 0
+        while True:
+            path = out_dir / (f"{stamp}.json" if suffix == 0 else f"{stamp}-{suffix}.json")
+            try:
+                with path.open("x") as handle:
+                    handle.write(text)
+                break
+            except FileExistsError:
+                suffix += 1
+        (out_dir / "latest.json").write_text(text)
         return path
 
     def summary(self) -> str:
@@ -184,6 +193,42 @@ def pose_features(qpos: np.ndarray) -> np.ndarray:
     """``[..., 2]`` (x, theta) -> ``[..., 3]`` (x, cos theta, sin theta)."""
 
     return np.stack([qpos[..., 0], np.cos(qpos[..., 1]), np.sin(qpos[..., 1])], axis=-1)
+
+
+def noisy_observation(
+    episodes: StateEpisodes, sigma_x: float, sigma_theta: float, seed: int, *, velocity: str = "backward",
+) -> StateEpisodes:
+    """What a pose encoder would see: Gaussian pose noise, velocity by finite differences.
+
+    ``qpos`` gets independent per-frame noise (``sigma_x`` metres, ``sigma_theta``
+    radians); ``qvel`` is replaced by finite differences of the noisy poses,
+    as in the mechanics world model: ``"central"`` (its training-time
+    stencil; one-sided at the episode ends), ``"backward"`` (causal, its
+    open-loop start state; forward difference at frame 0), or ``"savgol"``
+    (non-causal Savitzky–Golay slope over 9 frames, about 5× less noise
+    than ``"central"``; central differences within 4 frames of the ends).
+    """
+
+    rng = np.random.default_rng(seed)
+    qpos = episodes.qpos + rng.normal(size=episodes.qpos.shape) * np.array([sigma_x, sigma_theta])
+    dt = episodes.frame_dt
+    qvel = np.empty_like(qpos)
+    if velocity == "backward":
+        qvel[:, 1:] = (qpos[:, 1:] - qpos[:, :-1]) / dt
+        qvel[:, 0] = qvel[:, 1]
+    elif velocity in ("central", "savgol"):
+        qvel[:, 1:-1] = (qpos[:, 2:] - qpos[:, :-2]) / (2 * dt)
+        qvel[:, 0] = (qpos[:, 1] - qpos[:, 0]) / dt
+        qvel[:, -1] = (qpos[:, -1] - qpos[:, -2]) / dt
+        if velocity == "savgol":  # the quadratic fit's slope at the centre equals the linear fit's
+            half = 4
+            tau = np.arange(-half, half + 1)
+            frames = qpos.shape[1]
+            slope = sum(t * qpos[:, half + t : frames - half + t] for t in tau) / (dt * (tau**2).sum())
+            qvel[:, half : frames - half] = slope
+    else:
+        raise ValueError(f"unknown velocity stencil {velocity!r}")
+    return StateEpisodes(qpos=qpos, qvel=qvel, actions=episodes.actions, frame_dt=dt)
 
 
 def load_shift_splits(dataset_dir: Path, seed: int = 0) -> tuple[StateEpisodes, StateEpisodes, StateEpisodes]:

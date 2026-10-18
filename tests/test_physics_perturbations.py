@@ -69,6 +69,16 @@ def test_apply_physics_param_scales_mutates_named_entries() -> None:
     assert physics.model.dof_damping[0] == pytest.approx(0.10)  # untouched
 
 
+def test_apply_physics_param_scales_scales_gear_and_gravity() -> None:
+    physics = _make_physics()
+    physics.model.actuator_gear = np.asarray([[10.0, 0, 0, 0, 0, 0]])
+    physics.model.opt = type("Opt", (), {"gravity": np.asarray([0.0, 0.0, -9.81])})()
+    apply_physics_param_scales(physics, {"actuator_gear_0": 2.0, "gravity": 0.5})
+    assert physics.model.actuator_gear[0, 0] == pytest.approx(20.0)
+    np.testing.assert_allclose(physics.model.opt.gravity, [0.0, 0.0, -4.905])
+    PixelEnvConfig(physics_param_scales={"actuator_gear_0": 2.0, "gravity": 0.5})
+
+
 def test_apply_physics_param_scales_rejects_negative() -> None:
     physics = _make_physics()
     with pytest.raises(ValueError, match="must be positive"):

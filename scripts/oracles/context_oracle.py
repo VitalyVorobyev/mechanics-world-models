@@ -3,10 +3,12 @@
 Both forms train on simulated cart masses (default 1.0 nominal, 0.7, 0.85,
 1.2, 1.4; state only, generated in seconds) with a per-mass 3-number
 context, then adapt only a new context to cart mass x0.5 and x2, which lie
-outside the training range.
+outside the training range. ``--param actuator_gear_0`` (or ``gravity``)
+varies that parameter instead, for both training and ``--sim-shift``.
 
 Usage:
   .venv/bin/python scripts/oracles/context_oracle.py --seed 0
+  .venv/bin/python scripts/oracles/context_oracle.py --param actuator_gear_0 --sim-shift gear_x2=2
 
 Writes runs/oracles/context_oracle/<timestamp>.json. Resumable through
 --cache-dir like dynamics_oracle.py; progress lines "[cells done/total]".
@@ -15,12 +17,16 @@ Writes runs/oracles/context_oracle/<timestamp>.json. Resumable through
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import torch
 
 from oracles.common import StateEpisodes, load_shift_splits, load_state_episodes
 from oracles.context import CONTEXT_MODES, run_context_oracle, simulate_state_episodes
+
+# Environment-name prefix per varied parameter (cart mass keeps its old names so caches stay valid).
+PARAM_PREFIX = {"body_mass_1": "cart_mass", "actuator_gear_0": "gear", "gravity": "gravity"}
 
 
 def main() -> None:
@@ -31,37 +37,58 @@ def main() -> None:
     )
     parser.add_argument(
         "--sim-shift", action="append", default=None,
-        help="NAME=CART_MASS_SCALE: simulate a test shift (30 episodes split 15/7/8) instead of datasets",
+        help="NAME=SCALE of --param: simulate a test shift (30 episodes split 15/7/8) instead of datasets",
     )
-    parser.add_argument("--train-masses", type=float, nargs="+", default=[1.0, 0.7, 0.85, 1.2, 1.4])
+    parser.add_argument(
+        "--param", choices=sorted(PARAM_PREFIX), default="body_mass_1",
+        help="physics scale varied across training environments and simulated shifts (default: cart mass)",
+    )
+    parser.add_argument(
+        "--train-scales", "--train-masses", dest="train_scales", type=float, nargs="+",
+        default=[1.0, 0.7, 0.85, 1.2, 1.4],
+    )
     parser.add_argument("--episodes-per-mass", type=int, default=30)
     parser.add_argument("--ks", type=int, nargs="+", default=[1, 2, 5, 20])
     parser.add_argument("--pretrain-steps", type=int, default=15000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--modes", nargs="+", default=list(CONTEXT_MODES))
+    parser.add_argument(
+        "--pose-noise", type=float, nargs=2, default=[0.0, 0.0], metavar=("SIGMA_X_M", "SIGMA_THETA_DEG"),
+        help="train/adapt/select on noisy poses with finite-difference velocities (pixel-encoder stand-in)",
+    )
+    parser.add_argument(
+        "--start-context", type=int, default=0,
+        help="with --pose-noise: compare start-state estimators using this many context frames (e.g. 8)",
+    )
+    parser.add_argument(
+        "--train-velocity", choices=("central", "savgol"), default="central",
+        help="with --pose-noise: velocity stencil for training/adaptation/selection windows",
+    )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
-    if args.train_masses[0] != 1.0:
-        parser.error("the first training mass must be the nominal 1.0 (its context is pinned to zero)")
+    if args.train_scales[0] != 1.0:
+        parser.error("the first training scale must be the nominal 1.0 (its context is pinned to zero)")
+    prefix = PARAM_PREFIX[args.param]
 
     shift_items = args.shift or [
         "cart_mass_x05=data/cartpole-ood-cartmass05-15k-v2",
         "cart_mass_x2=data/cartpole-ood-cartmass20-15k-v2",
     ]
     train_envs = {
-        f"cart_mass_x{m:g}": simulate_state_episodes(
-            None if m == 1.0 else {"body_mass_1": m}, episodes=args.episodes_per_mass, seed=1000 * args.seed + i,
+        f"{prefix}_x{m:g}": simulate_state_episodes(
+            None if m == 1.0 else {args.param: m}, episodes=args.episodes_per_mass, seed=1000 * args.seed + i,
         )
-        for i, m in enumerate(args.train_masses)
+        for i, m in enumerate(args.train_scales)
     }
     nominal_val = load_state_episodes(args.nominal, split="val", seed=args.seed)
-    shifted = {}
+    shifted, shift_scales = {}, {}
     if args.sim_shift:
         for index, item in enumerate(args.sim_shift):
             name, _, scale = item.partition("=")
-            sim = simulate_state_episodes({"body_mass_1": float(scale)}, episodes=30, seed=1000 * args.seed + 500 + index)
+            shift_scales[name] = {args.param: float(scale)}
+            sim = simulate_state_episodes(shift_scales[name], episodes=30, seed=1000 * args.seed + 500 + index)
             shifted[name] = tuple(
                 StateEpisodes(qpos=sim.qpos[part], qvel=sim.qvel[part], actions=sim.actions[part], frame_dt=sim.frame_dt)
                 for part in (slice(0, 15), slice(15, 22), slice(22, 30))
@@ -72,7 +99,9 @@ def main() -> None:
             shifted[name] = load_shift_splits(Path(directory), seed=args.seed)
     result = run_context_oracle(
         train_envs, nominal_val, shifted, ks=args.ks, pretrain_steps=args.pretrain_steps, seed=args.seed,
-        modes=args.modes, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
+        modes=args.modes, pose_noise=(args.pose_noise[0], math.radians(args.pose_noise[1])),
+        shift_scales=shift_scales or None, start_context=args.start_context,
+        train_velocity=args.train_velocity, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
     path = result.write()
     print(result.summary())

@@ -185,12 +185,19 @@ Windows = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 
 def _windows(
-    episodes: StateEpisodes, horizon: int, *, stride: int = 1, rail_margin: float | None = None,
+    episodes: StateEpisodes,
+    horizon: int,
+    *,
+    stride: int = 1,
+    rail_margin: float | None = None,
+    rail_reference: np.ndarray | None = None,
 ) -> Windows:
     """Windows: start ``q, qdot [N, 2]``, ``actions [N, H, A]``, targets ``[N, H, 2]``.
 
     With ``rail_margin`` set, windows whose cart reaches ``|x| >= 1.8 - margin``
-    (start or any target frame) are dropped.
+    (start or any target frame) are dropped. ``rail_reference`` (``qpos``-shaped,
+    default ``episodes.qpos``) decides that, so noisy and clean views of the
+    same episodes keep the same windows.
     """
 
     qpos, qvel, actions = episodes.qpos, episodes.qvel, episodes.actions
@@ -201,7 +208,8 @@ def _windows(
     act = np.stack([actions[:, s : s + horizon] for s in starts], axis=1).reshape(-1, horizon, actions.shape[-1])
     tgt = np.stack([qpos[:, s + 1 : s + 1 + horizon] for s in starts], axis=1).reshape(-1, horizon, 2)
     if rail_margin is not None:
-        reach = np.stack([np.abs(qpos[:, s : s + horizon + 1, 0]).max(axis=1) for s in starts], axis=1)
+        ref = qpos if rail_reference is None else rail_reference
+        reach = np.stack([np.abs(ref[:, s : s + horizon + 1, 0]).max(axis=1) for s in starts], axis=1)
         keep = reach.reshape(-1) < SLIDER_LIMIT - rail_margin
         q0, v0, act, tgt = q0[keep], v0[keep], act[keep], tgt[keep]
     as_t = lambda a: torch.as_tensor(a, dtype=torch.float32)  # noqa: E731

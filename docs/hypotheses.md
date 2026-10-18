@@ -26,7 +26,7 @@ Last full review: 2026-10-18.
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
 | A-DEC-1 | A Linear→deconv decoder can render the cartpole from a 2–3 number pose | refined: renders from true pose; end-to-end failure is joint learning |
 | A-FE-1 | Keypoint encoder + geometric renderer learn the pose end to end | open (renderer OK; tip keypoint weak) |
-| A-ENC-1 | A per-frame CNN can regress `(x, cos θ, sin θ)` from 84×84 pixels | supported for x, partial for θ |
+| A-ENC-1 | A per-frame CNN can regress `(x, cos θ, sin θ)` from 84×84 pixels | supported for visible, non-upright poses (0.1–0.4 px); fails on upright (rare) and out-of-view frames (37%) |
 | A-ROUTE-1 | In `concat` mode the pose goes into `q`, not `z` | refuted |
 | A-DT-1 | Model `dt` equals the frame interval | refuted for the April runs, fixed |
 | A-OOD-1 | `geom_size_2_1` scales the pole length | refuted (it is a rail) |
@@ -34,6 +34,7 @@ Last full review: 2026-10-18.
 | A-OOD-3 | Cart-mass shifts measurably change the dynamics | supported |
 | A-OOD-4 | Pole-length shifts change the dynamics without confounding appearance | refuted |
 | A-DATA-1 | Random-policy data covers the states MPC swing-up needs | refuted |
+| A-VIEW-1 | The camera sees the cart and pole in every frame | refuted: cart out of view in 26% of frames, cart or tip in 37% |
 | A-PROBE-1 | Linear `q → raw qpos` R² > 0.8 is a valid factorization gate | refuted |
 | A-METRIC-1 | The live open-loop probe is comparable to the offline eval | refuted for April runs, fixed |
 | A-LEAK-1 | The open-loop start state uses only context frames | refuted for April runs, fixed |
@@ -302,6 +303,29 @@ Last full review: 2026-10-18.
     random-action data; the pinned nominal context plus the shared `M`;
     a mismatch between the pretraining scale and the calibrated scale.
     Not yet tested; it did not prevent good adaptation.
+  - Surprise 1, discriminating test (prediction written 2026-10-18 after
+    looking at seed 0's contexts only; seeds 1–2 unseen):
+    - Explanation (a) predicts a near-gauge: the cart's response depends
+      on the gain-to-inertia ratio, so only `(1 + o₀) / exp(g)` is pinned
+      down. It should match the true cart-direction inertia ratio
+      `(s + 0.1) / 1.1` within 5% for every training mass and seed, while
+      `o₀` and `g` separately are arbitrary.
+    - (b) and (c) predict no such match.
+    - Test: read the learned contexts from the logs of seeds 1–2.
+  - Surprise 1, result (2026-10-18, `runs/oracles/logs/context_seed{0,1,2}.log`):
+    **explained by (a)**. `(1 + o₀) / exp(g)` matches `(s + 0.1) / 1.1`
+    within 1.6–2.8% for all 12 (mass, seed) pairs, always 2% low, while
+    the gain drifts to 1.4–1.75 and `o₀` follows it.
+    - Why it is a near-symmetry: scaling the cart's mass entry and the
+      actuation by the same factor λ leaves the cart's response to the
+      motor unchanged. It changes the dynamics only through the coupling
+      term `M₀₁² / (M₀₀ M₁₁)` (at most 7% on cartpole) and the pole's
+      small reaction force on the cart (pole 0.1 kg vs cart 1 kg).
+    - Consequence: the slots identify the cart-direction inertia relative
+      to the motor gain, not mass and gain separately. Adaptation moves
+      along the same ridge, so this does not affect the H1b result. A
+      claim of "physically identified parameters" must say "up to this
+      near-gauge".
   - Surprise 2, which matters for the claim: the entire advantage is on
     ×0.5, while ×2 is at parity, even though ×2 is further outside the
     training range (1.4). A lighter cart reaches faster states than
@@ -384,14 +408,171 @@ Last full review: 2026-10-18.
     - true state;
     - the prerequisite margin is borderline (nominal error about 0.3 of
       the ×0.5 effect);
-    - the learned training contexts of the Lagrangian are not physical
-      (Surprise 1, untested).
+    - the learned mass and gain slots are identified only up to a
+      near-gauge; their ratio is right within 3% (Surprise 1, explained).
   - **Next per the decision rule:** the pixel version, starting with
     A-FE-1 (front end). A cheaper intermediate is noisy state (simulated
     keypoint noise at the level the encoder oracle achieves): does the
     advantage survive pose noise? Then a second parameter (actuator gear,
     or gravity via the potential) to show it is not specific to the mass
     slot.
+
+- **Noisy-state test (prediction written 2026-10-18, before running):**
+  - Question: does the advantage survive the pose noise a pixel encoder
+    would add, with velocities from finite differences (as in the
+    mechanics world model)?
+  - Pixel scale of the 84×84 camera (projection matrix, camera 4 m away,
+    fovy 45°): 25.35 px per metre in both directions. One pixel is
+    0.039 m of cart position, or 2.3° of pole angle at the tip of the 1 m
+    pole. (The first estimate of 30 px/m, used to choose the levels,
+    counted the pole's floor shadow.)
+  - Noise levels, per frame, independent (run tags in brackets):
+    - about 0.08 px: σx 0.0033 m, σθ 0.17° [`0.1px`];
+    - about 0.25 px: σx 0.01 m, σθ 0.5° [`0.3px`] (good subpixel
+      keypoints);
+    - about 0.8 px: σx 0.033 m, σθ 1.7° [`1px`];
+    - plus a zero-noise run with the same shifts.
+  - Training, adaptation and selection windows use noisy poses with
+    central-difference velocities (the model's training stencil). Test
+    errors are against true poses, in two ways:
+    - from the true start state: did the dynamics come out right?
+    - from a noisy start state with a backward-difference velocity: the
+      model's open-loop start, with the true-dynamics floor on the same
+      windows (`floor_true.noisy_start`).
+  - Setup: simulated cart masses ×0.5, ×0.4, ×0.3; modes `lag_ctx`,
+    `mlp_ctx`; k ∈ {1, 5}; seeds 0–2; otherwise the context-oracle
+    defaults.
+  - Finite-difference velocity noise relative to the data's velocity
+    spread (std 0.8 m/s for x, 1.95 rad/s for θ):
+
+    | noise | central diff, x / θ | backward diff, x / θ |
+    |---|---|---|
+    | 0.1 px | 0.12 m/s / 0.10 rad/s | 0.23 / 0.21 |
+    | 0.3 px | 0.35 / 0.31 | 0.7 / 0.6 |
+    | 1 px | 1.2 / 1.0 | 2.3 / 2.1 |
+
+  - Prediction:
+    - **True start state:** the ratio stays ≥ 1.3 at 0.1 and 0.3 px. At
+      1 px both forms degrade, because noisy start velocities bias the
+      fit (errors in variables, absorbed as extra damping). The ratio
+      there is a coin flip.
+    - **Noisy start state:** the floor from start-velocity noise
+      dominates at 0.3 and 1 px (θ error of about σv × 0.4 s at h20).
+      So the ratio falls towards 1 there, whatever the dynamics. That
+      makes start-state estimation, not dynamics, the next bottleneck
+      for pixels.
+  - Decision rule (true-start ratio, mean over the three shifts, k1 and
+    k5, 3 seeds):
+    - *≥ 1.3 at 0.3 px:* the advantage survives realistic keypoint
+      noise. The front-end spec becomes "about 0.3 px", and the pixel
+      version goes ahead.
+    - *≥ 1.3 only at 0.1 px:* the front end must be near-perfect.
+      Before pixels, test better start-state estimation (multi-frame
+      fit) and an errors-in-variables-aware fit.
+    - *< 1.3 at 0.1 px:* the advantage is fragile. Diagnose before
+      going further.
+
+- **Noisy-state interim (2026-10-18, 0.08 and 0.25 px done, 1 px
+  running):**
+  - From the true start state the ratio holds: 2.2 ± 0.3 (0.08 px) and
+    1.8 ± 0.1 (0.25 px, 2 seeds) at k1.
+  - But noisy training hurts the MLP's nominal accuracy much more: at
+    0.25 px its nominal h20 error is 0.050 against 0.0185 for the
+    Lagrangian (0.014 for both at 0.08 px). Part of the ratio at 0.25 px
+    is robustness to noisy training data, not adaptation.
+  - From a noisy start with a two-frame backward difference, the
+    true-dynamics floor is 0.054–0.065 at h20 already at 0.08 px, and
+    0.14–0.15 at 0.25 px. Every model sits on that floor, and the ratio
+    falls to 1.3 (0.08 px) and 1.0 (0.25 px). The predicted bottleneck
+    appears even earlier than predicted.
+  - Bug found: parallel seeds finishing in the same second overwrote each
+    other's result file (lost: 0.25 px seed 1). Fixed in
+    `OracleResult.write`; the run is regenerated from cache.
+- **Start-state estimation (prediction written 2026-10-18, before
+  running):**
+  - Question: with a better causal estimate of the start state from the
+    last 8 noisy frames (0.16 s), does the floor drop enough for the
+    dynamics advantage to show again?
+  - Estimators (`src/oracles/start_state.py`): `backward` (two frames),
+    `quadfit` (least-squares quadratic over the context), and `shoot`
+    (fit the state at the first context frame so the model's own rollout
+    under the logged actions matches the context poses, then continue).
+    `shoot` is what a world model's filtering posterior approximates.
+  - Same windows for every estimator; the true-dynamics floor is reported
+    for each.
+  - Prediction:
+    - True-dynamics floor at h20 with `shoot`: below 0.02 at 0.25 px,
+      i.e. 7× below `backward`. `quadfit` in between.
+    - With `shoot`, the learned-model ratio recovers to ≥ 1.3 at 0.08 and
+      0.25 px, because the start-state error now depends on the model:
+      a wrong model fits the context worse and predicts worse.
+    - At 0.8 px even `shoot` leaves a floor comparable to the adapted
+      errors; the ratio there is uncertain.
+  - Decision rule (k1, mean over three shifts and seeds, `shoot`):
+    - *≥ 1.3 at 0.25 px:* the pixel version needs a model-based
+      (filtering or shooting) start state and a front end at about
+      0.25 px. Both become requirements for the pixel model.
+    - *< 1.3 at 0.25 px but ≥ 1.3 at 0.08 px:* the front end must be
+      better than 0.1 px. That is likely out of reach at 84×84, so
+      consider a higher resolution before pixels.
+    - *< 1.3 everywhere:* the advantage does not survive realistic
+      observation noise; stop H1b on pixels and write up the state-level
+      result.
+
+- **Noisy-state result at 0.8 px (2026-10-18):** training itself fails.
+  Both forms reach a nominal h20 error of about 0.16 from the true start
+  state (0.009 without noise). Central-difference velocities at 0.8 px
+  carry 1.2 m/s and 1.0 rad/s of noise, as large as the signal, so the
+  fit is an errors-in-variables problem for both forms. The ratio is 0.8,
+  which is meaningless at that error level.
+- **Smoothed training velocities (prediction written 2026-10-18, before
+  running):**
+  - Change: training, adaptation and selection windows use a 9-frame
+    Savitzky–Golay slope instead of central differences
+    (`--train-velocity savgol`). It is non-causal, which is allowed in
+    training, and about 5× less noisy. Test start states as before, plus
+    `shoot` with 16 context frames.
+  - Runs: 0.25 px and 0.8 px, seeds 0–2, same shifts as the noise test.
+  - Prediction:
+    - At 0.8 px the nominal h20 error from the true start drops from 0.16
+      to below 0.04 for both forms.
+    - At 0.25 px the MLP's nominal penalty mostly disappears (0.050 →
+      below 0.025).
+    - The true-start ratio is ≥ 1.3 at 0.25 px, and ≥ 1.3 at 0.8 px with
+      about 55% confidence.
+  - Decision rule:
+    - *Nominal accuracy restored:* the pixel model must use smoothed
+      (non-causal) velocities in training. That is easy: the encoder's
+      posterior can smooth over the training window.
+    - *Not restored at 0.8 px:* treat 0.8 px as beyond reach, and require
+      a front end at or below 0.25 px.
+
+- **Second parameter, actuator gear (prediction written 2026-10-18,
+  before running):**
+  - Setup: as the context oracle, but the five training environments vary
+    the actuator gear (×1.0, 0.7, 0.85, 1.2, 1.4) instead of the cart
+    mass. Simulated test gears: ×1.3 (interpolation), ×0.5, ×2, ×3.
+    Modes `lag_ctx`, `mlp_ctx`; k ∈ {1, 5}; seeds 0–2; true state.
+  - The Lagrangian's gain slot represents a gear change exactly (log gain
+    = log scale); the mass slots are not needed.
+  - Prediction:
+    - ×1.3: parity (ratio < 1.3), as for mass interpolation.
+    - ×2 and ×3: the Lagrangian is better, ratio ≥ 1.5 at ×2 and higher at
+      ×3. A context MLP has to learn a context-dependent action response,
+      and nothing makes that extrapolate linearly. About 60% confidence:
+      the MLP's action pathway may be nearly linear and extrapolate a
+      gain by itself.
+    - ×0.5: both near the floor (a weak motor moves the cart little), so
+      no discrimination.
+  - Decision rule (k1 and k5, 3-seed mean):
+    - *Ratio ≥ 1.3 at ×2 and ×3, rising from ×2 to ×3, parity at ×1.3:*
+      H1b holds for a second parameter on true state; the claim covers
+      actuation as well as inertia.
+    - *Parity at ×2 and ×3:* the advantage is specific to the mass slot.
+      Narrow the claim to inertial parameters, and look at why the MLP
+      extrapolates gain (inspect its learned contexts).
+    - *Lagrangian worse:* diagnose (slot misuse, recipe selection) before
+      drawing conclusions.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.
@@ -490,6 +671,57 @@ Last full review: 2026-10-18.
     harsh score.
   - RSSM features give pose R² 0.93 linearly.
 - **To do:** longer training and an angle-error metric in degrees.
+- **Angle errors in degrees (2026-10-18, `runs/oracles/logs/encoder_deg.log`,
+  held-out episodes, constant lr 1e-3):**
+
+  | encoder, steps | θ median | θ rms | θ p90 | x median | x rms (px) |
+  |---|---|---|---|---|---|
+  | keypoint, 1500 | 1.9° | 25.8° | 19.3° | 0.034 m | 1.5 |
+  | keypoint, 20000 | 7.5° | 33.2° | 49.4° | 0.050 m | 2.7 |
+  | conv, 1500 | 1.8° | 23.6° | 18.2° | 0.025 m | 2.1 |
+  | conv, 20000 | 1.0° | 20.8° | 13.4° | 0.010 m | 1.0 |
+
+  - Typical frames are good (conv median 1.0°, about 0.4 px at the tip),
+    but a heavy tail dominates the rms. Keypoint training is unstable at
+    constant lr (loss spikes after step 4000), so it got worse.
+  - Prediction for the tail (written before testing): the camera sees
+    only ±1.66 m of the ±1.8 m rail (25.35 px/m, 84 px), and a
+    horizontal pole reaches 1 m beyond the cart. Gross errors concentrate
+    in frames where the cart or the pole tip is out of view. On fully
+    visible frames the conv encoder's rms θ error is below 3°.
+    Alternatives: errors concentrate at particular angles (pole crossing
+    the cart or the rail), or at high angular speed (no blur in MuJoCo,
+    so unlikely).
+  - Test: split the held-out errors by visibility and by angle; add a
+    cosine learning-rate decay to fix the keypoint instability.
+- **Result (2026-10-18, `runs/oracles/logs/encoder_cosine.log`, 20000
+  steps, cosine decay):** the prediction is **partly refuted**. The tail
+  has two sources, and visibility is only one of them.
+
+  | frames (share of held-out) | conv θ median / rms | keypoint θ median / rms | conv / keypoint x rms (px) |
+  |---|---|---|---|
+  | in view, hanging (52%) | 0.19° / 0.31° | 0.93° / 1.42° | 0.11 / 0.37 |
+  | in view, sideways (10%) | 0.52° / 26.8° | 1.15° / 1.45° | 2.9 / 0.60 |
+  | in view, upright (1.5%) | 154° / 137° | 101° / 83° | 5.6 / 1.2 |
+  | cart or tip out of view (37%) | 0.88° / 21.0° | 2.9° / 21.3° | 0.67 / 1.17 |
+
+  - Overall held-out R²: conv 0.955, keypoint 0.961; both now pass the
+    0.95 criterion. Cosine decay removed the keypoint instability.
+  - Typical poses are localized at 0.1–0.4 px at the pole tip, which is
+    inside the noise range the noisy-state test covers.
+  - **Upright poses are wrong by 100–150°.** They are 1.5% of
+    random-policy frames, so both encoders regress them towards
+    "hanging". This is a data-coverage failure (see A-DATA-1). The
+    keypoint geometry does not rescue it.
+  - **In 37% of frames the cart or the tip is outside the image.** The
+    camera sees ±1.66 m, the rail is ±1.8 m, and the pole reaches 1 m
+    beyond the cart. Over the whole training set, 26% of frames have the
+    cart itself out of view. Every pixel model trained on this data
+    (April runs included) was asked to predict invisible states.
+  - Consequences for the pixel version of H1b:
+    - restrict windows to fully visible frames, as the rail-free
+      protocol does;
+    - if upright states matter, collect data with swing-up excitation.
 
 ### A-ROUTE-1 — pose goes into `q`
 - **Status:** refuted.
@@ -532,6 +764,23 @@ Mean |Δ(x, cos θ, sin θ)| against nominal, same random actions, 8 seeds
     cartpole".
 - **Implication:** any control experiment needs planner-collected or
   swing-up-covering data.
+
+### A-VIEW-1 — the camera sees the system
+- **Status:** refuted (2026-10-18).
+- **Evidence:**
+  - Camera 0 (4 m away, fovy 45°, 84 px) gives 25.35 px/m and sees
+    x ∈ ±1.66 m. The rail limit is ±1.8 m.
+  - On the nominal training set (`data/cartpole-swingup-random-100k-v2`),
+    the cart centre is out of view in 26% of frames. The cart or the pole
+    tip (2 px margin) is out of view in 35% (65% fully visible); the
+    encoder oracle's held-out frames give 37%.
+  - The encoder oracle's errors on those frames have an rms of 21°.
+- **Implication:**
+  - Pixel losses and probes average over frames whose state is
+    invisible.
+  - Fix in evaluation: restrict to fully visible windows (`oracles.encoder.in_view`).
+  - Fix in data: a wider field of view, a tracking camera, or a policy
+    that stays away from the rail.
 
 ### A-PROBE-1 — linear raw-qpos probe as gate
 - **Status:** refuted.
