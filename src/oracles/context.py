@@ -104,8 +104,21 @@ class _SlotActuation(nn.Module):
         return self.log_gain.exp().view(-1, 1, 1) * self.base(q)  # log_gain [N]
 
 
+class _SlotPotential(nn.Module):
+    def __init__(self, base: Potential, log_scale: torch.Tensor) -> None:
+        super().__init__()
+        self.base, self.log_scale, self.q_dim = base, log_scale, base.q_dim
+
+    def forward(self, q: torch.Tensor) -> torch.Tensor:
+        return self.log_scale.exp() * self.base(q)  # log_scale [N]
+
+
 class ContextDynamics(nn.Module):
-    """Either form with a per-environment context table and one test-time context."""
+    """Either form with a per-environment context table and one test-time context.
+
+    With ``potential_slot`` the context has a fourth number for both forms; the
+    Lagrangian uses it as a log scale on ``V`` (a gravity change scales ``V``).
+    """
 
     def __init__(
         self,
@@ -117,9 +130,11 @@ class ContextDynamics(nn.Module):
         dt: float = 0.02,
         n_substeps: int = 2,
         actuated_dims: Sequence[int] | None = (0,),
+        potential_slot: bool = False,
     ) -> None:
         super().__init__()
         self.form, self.dt, self.n_substeps = form, dt, n_substeps
+        self.context_dim = CONTEXT_DIM + int(potential_slot)
         if form == "lagrangian":
             self.mass = MassMatrix(q_dim=2, hidden_size=hidden, hidden_layers=2, angle_dims=(1,))
             self.potential = Potential(q_dim=2, hidden_size=hidden, hidden_layers=2, angle_dims=(1,))
@@ -130,20 +145,20 @@ class ContextDynamics(nn.Module):
             )
         elif form == "mlp":
             self.mlp = MLPDynamics(
-                q_dim=2, action_dim=action_dim + CONTEXT_DIM, hidden_size=2 * hidden, hidden_layers=2,
+                q_dim=2, action_dim=action_dim + self.context_dim, hidden_size=2 * hidden, hidden_layers=2,
                 angle_dims=(1,),
             )
         else:
             raise ValueError(f"unknown dynamics form {form!r}")
         # Row 0 (nominal) is pinned to zero in `contexts_for`.
-        self.contexts = nn.Parameter(torch.zeros(num_envs, CONTEXT_DIM))
-        self.adapted = nn.Parameter(torch.zeros(CONTEXT_DIM))
+        self.contexts = nn.Parameter(torch.zeros(num_envs, self.context_dim))
+        self.adapted = nn.Parameter(torch.zeros(self.context_dim))
         self.register_buffer("mass_scale", torch.ones(2), persistent=False)
         self.calibrated = False
 
     def contexts_for(self, env: torch.Tensor | None, n: int) -> torch.Tensor:
         if env is None:
-            return self.adapted.expand(n, CONTEXT_DIM)
+            return self.adapted.expand(n, self.context_dim)
         pinned = torch.cat([torch.zeros_like(self.contexts[:1]), self.contexts[1:]], dim=0)
         return pinned[env]
 
@@ -158,14 +173,14 @@ class ContextDynamics(nn.Module):
     ) -> torch.Tensor:
         """``q, qdot [N, 2]``, ``actions [N, H, A]``, ``env [N]`` (None = adapted) -> ``q [N, H, 2]``."""
 
-        context = self.contexts_for(env, q.shape[0])  # [N, 3]
+        context = self.contexts_for(env, q.shape[0])  # [N, 3] (or [N, 4] with the potential slot)
         if self.form == "lagrangian":
             scale = self.mass_scale
             if not self.calibrated:  # during pretraining: track the current mass scale
                 scale = torch.diagonal(self.mass(q), dim1=-2, dim2=-1).mean(dim=0).detach()
             dynamics = LagrangianDynamics(
                 mass_matrix=_SlotMass(self.mass, context[:, :2] * scale),
-                potential=self.potential,
+                potential=_SlotPotential(self.potential, context[:, 3]) if self.context_dim > 3 else self.potential,
                 dissipation=self.damping,
                 actuation=_SlotActuation(self.actuation, context[:, 2]),
             )
@@ -362,6 +377,7 @@ def run_context_oracle(
     start_context: int = 0,
     train_velocity: str = "central",
     pose_source: str | None = None,
+    potential_slot: bool = False,
     cache_dir: Path | None = None,
     log=print,
 ) -> OracleResult:
@@ -413,6 +429,9 @@ def run_context_oracle(
         "train_envs", "train_episodes", "train_horizon", "pretrain_steps", "batch_size", "lr", "n_substeps",
         "rail_margin", "actuated_dims", "seed", "frame_dt",
     )
+    if potential_slot:  # only then, so earlier caches keep their hashes
+        config["potential_slot"] = True
+        pretrain_keys += ("potential_slot",)
     if noisy:  # only then, so earlier caches keep their hashes
         config["pose_noise"] = list(pose_noise)
         pretrain_keys += ("pose_noise",)
@@ -440,7 +459,9 @@ def run_context_oracle(
     for form in ("lagrangian", "mlp"):
         start = time.time()
         torch.manual_seed(seed)
-        model = ContextDynamics(form, len(env_names), dt=nominal_val.frame_dt, n_substeps=n_substeps)
+        model = ContextDynamics(
+            form, len(env_names), dt=nominal_val.frame_dt, n_substeps=n_substeps, potential_slot=potential_slot,
+        )
         if cache.load_model(form, model):
             log(f"pretrained {form}: loaded from cache")
         else:

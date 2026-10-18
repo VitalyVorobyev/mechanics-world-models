@@ -20,7 +20,7 @@ Last full review: 2026-10-18.
 | ID | Statement (short) | Status |
 |---|---|---|
 | H1a | Mechanics structure improves extrapolation to unseen *states* of the same system | open |
-| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation*, for cart mass (up to 5.8×) and actuator gear (up to 4×) vs a context MLP; parity inside the trained range; survives 0.25 px pose noise with a model-based start state (see noisy-state entries); pixels not tested |
+| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation* when the parameter has a matching slot: cart mass (up to 7×), actuator gear (4×), gravity with a potential slot (5×) vs a context MLP; parity inside the trained range; a missing slot makes it 2–3× *worse*. Survives 0.25 px Gaussian pose noise with a model-based start state; not yet with real encoder poses (ratio 1.2) |
 | H1-zs | Structure alone (no adaptation) degrades more gracefully under parameter shift | refuted as a useful question |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
@@ -715,6 +715,51 @@ Last full review: 2026-10-18.
       regressor. Test this directly: remove the encoder's binned bias
       and re-run.
 
+- **Encoder-pose re-runs (2026-10-18):**
+
+  | encoder, training velocity | nominal h20 lag / mlp | true-start ratio k1 / k5 | `shoot` ratio k1 / k5 | `shoot` floor |
+  |---|---|---|---|---|
+  | keypoint, central | 0.035 / 0.037 | 1.26 / 1.27 | 1.21 / 1.20 | 0.031 |
+  | keypoint, savgol | 0.028 / 0.028 | 1.07 / 1.25 | 1.08 / 1.28 | 0.031 |
+  | conv, central | 0.053 / 0.024 (seed 0 NaN) | 0.74 / 1.03 | 0.75 / 0.96 | 0.040 |
+  | conv, savgol | 0.039 / 0.032 | 1.12 / 1.26 | 1.04 / 1.14 | 0.040 |
+
+  - Against the predictions:
+    - `shoot` ratios near the true-start ratios: confirmed (keypoint
+      1.21, conv 0.75).
+    - Smoothing improves the keypoint Lagrangian's nominal error (0.036
+      → 0.028): confirmed. But the ratio does not reach 1.3, so that
+      part is refuted.
+    - Conv at or below parity: confirmed.
+  - Adaptation on encoder poses gets only part of the way: adapted h20
+    is about 0.08, against 0.01–0.016 on true state and 0.035–0.05 with
+    0.25 px Gaussian noise.
+  - **Decision (written rule): below 1.3 → test the chart-bias
+    explanation directly.**
+- **Bias-removal test (prediction written 2026-10-18, before running):**
+  - Change: `--debias` subtracts the encoder's median error per (θ, x)
+    bin. It is fitted on the nominal training episodes with true poses,
+    an oracle calibration, and applied to every environment. The
+    residual (keypoint θ 0.41 px rms, lag-1 autocorrelation 0.25; conv
+    0.69 px, 0.58) stays.
+  - Runs: keypoint and conv, central velocities, `shoot` with 8 frames,
+    seeds 0–2.
+  - Prediction:
+    - If the chart bias is the limiting factor, debiasing lifts both
+      encoders: the keypoint ratio to ≥ 1.3, and the conv ratio to
+      ≥ 1.0 with the larger gain, since conv had the larger bias
+      (0.92 px vs 0.46 px). I give this about 50%.
+    - The alternative is that the time-correlated residual limits it. In
+      that case the ratios stay near 1.2 (keypoint) and 0.8 (conv).
+  - Decision rule:
+    - *Debiasing lifts the ratio ≥ 1.3:* the front-end requirement is a
+      metric, calibrated chart, with pose-dependent bias well below
+      0.5 px. That favours geometric (keypoint) decoding with explicit
+      calibration.
+    - *It does not:* the residual's temporal structure is the problem.
+      Model the observation noise explicitly (a filtering posterior with
+      a learned noise model) rather than treating poses as clean.
+
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**
   - Setup: as the context oracle, but the five training environments vary
@@ -784,6 +829,77 @@ Last full review: 2026-10-18.
       matching slot. Add a potential-scale slot (context dimension 4 for
       both forms) and re-test, and state the slot requirement in the
       claim.
+
+- **Third parameter, gravity: result (2026-10-18, train envs
+  `gravity_x*`, seeds 0–2):** the prediction is **refuted, in the
+  unfavourable direction**. The Lagrangian without a potential slot is
+  much *worse* than the context MLP, even inside the training range.
+
+  | shift | ratio k1 | ratio k5 | lag_ctx / mlp_ctx h20 (k1) | zero-shot |
+  |---|---|---|---|---|
+  | ×1.3 (inside) | 0.32 ± 0.08 | 0.54 ± 0.03 | 0.024 / 0.007 | 0.036 |
+  | ×0.5 | 0.40 ± 0.12 | 0.31 ± 0.03 | 0.020 / 0.008 | 0.083 |
+  | ×2 | 0.46 ± 0.12 | 0.51 ± 0.03 | 0.033 / 0.014 | 0.094 |
+  | ×3 | 1.00 ± 0.21 | 1.05 ± 0.20 | 0.044 / 0.042 | 0.128 |
+
+  - The near-equivalence (gravity ×s ≈ `M` and `B` ×1/s) is not good
+    enough: the diagonal offsets cannot reproduce it. A misspecified
+    slot costs 2–3× in error.
+  - **Consequence for the claim:** the advantage requires the shifted
+    parameter to enter through a matching slot. Structure helps where it
+    is specified correctly and hurts where it is not. The paper's claim
+    has to name the slot set (mass, gain, potential scale), and the
+    choice of slots becomes part of the method.
+- **Potential-scale slot (prediction written 2026-10-18, before
+  running):**
+  - Change: both forms get a 4-number context
+    (`--potential-slot`). The Lagrangian's fourth slot is a log scale on
+    `V`, which represents a gravity change exactly; the MLP gets one more
+    context input.
+  - Runs: (a) the gravity test again; (b) the cart-mass dose test (×0.5,
+    ×0.4, ×0.3) with the extra slot, to check that a redundant slot does
+    not erode the mass result. Seeds 0–2.
+  - Prediction:
+    - (a) parity at ×1.3, ratio ≥ 1.3 at ×2 and ×3. ×0.5 near parity (a
+      weaker gravity means slower motion).
+    - (b) mass ratios within 25% of the 3-slot results (3.8 mean at k1
+      in the same-protocol zero-noise run).
+  - Decision rule:
+    - *(a) and (b) hold:* a Lagrangian with a full physical slot set
+      (inertia, actuation, potential) extrapolates in every parameter it
+      covers. This becomes the H1b model for pixels.
+    - *(a) fails:* the potential slot is not identifiable enough from
+      random-action data. Inspect the learned contexts for a gauge, as
+      with Surprise 1.
+
+- **Potential-scale slot: result (2026-10-19, `--potential-slot`,
+  seeds 0–2):** (a) mostly confirmed, (b) confirmed.
+
+  | shift | ratio k1 | ratio k5 | lag_ctx / mlp_ctx h20 (k1) |
+  |---|---|---|---|
+  | gravity ×1.3 (inside) | 0.86 ± 0.10 | 1.01 ± 0.04 | 0.0085 / 0.0071 |
+  | gravity ×0.5 | 1.22 ± 0.27 | 1.21 ± 0.14 | 0.0060 / 0.0071 |
+  | gravity ×2 | 1.68 ± 0.53 | 1.21 ± 0.01 | 0.0093 / 0.0157 |
+  | gravity ×3 | 5.3 ± 0.8 | 4.8 ± 0.4 | 0.0100 / 0.053 |
+  | cart mass ×0.5 | 1.89 ± 0.35 | 2.69 ± 0.81 | 0.016 / 0.029 |
+  | cart mass ×0.4 | 3.7 ± 0.9 | 3.9 ± 0.5 | 0.016 / 0.057 |
+  | cart mass ×0.3 | 6.8 ± 1.9 | 7.0 ± 0.5 | 0.015 / 0.096 |
+
+  - Gravity:
+    - The Lagrangian adapts to 0.006–0.010 at every gravity, near its
+      nominal error (0.009). Without the slot it was at 0.020–0.044.
+    - ×2 at k5 (1.21) misses the 1.3 bar narrowly. Everything else
+      matches the prediction.
+    - The learned potential slot tracks log(scale): −0.30, −0.11, 0.23,
+      0.39 against −0.36, −0.16, 0.18, 0.34 (seed 0). The mass and gain
+      slots sit at a common offset (0.63, 0.54), the same near-gauge as in
+      Surprise 1.
+  - Mass with the extra slot: mean k1 ratio 4.1 against 3.8 with three
+    slots, so the redundant slot does not erode the result.
+  - **Decision (written rule):** a Lagrangian with a full physical slot
+    set (inertia, actuation, potential) extrapolates in every parameter
+    it covers, and a missing slot makes it worse than an MLP. The
+    four-slot model is the H1b model for pixels.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.
@@ -907,6 +1023,24 @@ Last full review: 2026-10-18.
     - Prediction: flips (error over 90°) fall below 10%, and the median
       error on in-view frames is ≤ 3° for the conv encoder (about 55%).
     - If that fails, try KeyCLD's heatmap loss.
+- **Coarse-to-fine result and diagnosis (2026-10-18):**
+  - Pooled loss (pool 8 and 24): still fails. Flips are 85% (keypoint)
+    and 92% (conv); conv x stays good (0.85 px), and θ stays near
+    upright.
+  - Discriminating check (scratchpad `render_sens.py`): the frozen
+    renderer *is* θ-sensitive, with loss 0.00039 at the true θ against
+    0.0037 at +10°. But the loss is **flat beyond about 10°** (+10°:
+    0.0037, +45°: 0.0041, +90°: 0.0037, +180°: 0.0036). At θ = 0.3 for
+    hanging targets the gradient points towards the truth for only 22%
+    of frames (35% with pooling), and its magnitude is about 1e-5.
+  - Conclusion: a sharp global minimum with a flat landscape around it.
+    Gradient descent cannot find it, and pooling the whole image does not
+    widen the basin, because the thin pole is a tiny fraction of the
+    pooled pixels.
+  - Next (cheap): render-and-compare. Grid-search θ (and x) through the
+    frozen renderer per frame, then use the result as a pseudo-label for
+    the encoder (analysis by synthesis, still label-free). The search
+    alone is being tested now (scratchpad `render_search.py`).
 
 ### A-ENC-1 — CNN regresses the state
 - **Status:** supported for x; partial for θ.

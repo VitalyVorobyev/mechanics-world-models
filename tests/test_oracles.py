@@ -387,3 +387,27 @@ def test_pooled_loss_gives_gradient_without_overlap() -> None:
     plain = torch.autograd.grad(_reconstruction_loss(pred, target, 1.0), shift, retain_graph=True)[0]
     pooled = torch.autograd.grad(_reconstruction_loss(pred, target, 1.0, (24,)), shift)[0]
     assert abs(float(pooled)) > 10 * abs(float(plain))
+
+
+def test_context_oracle_potential_slot(tmp_path: Path) -> None:
+    from oracles.context import run_context_oracle
+
+    train_envs = {"nominal": _synthetic_episodes(3, 60, 1.0, 0), "light": _synthetic_episodes(3, 60, 0.7, 5)}
+    shifted = {"heavy": tuple(_synthetic_episodes(n, 60, 2.0, s) for n, s in ((3, 2), (2, 3), (2, 4)))}
+    result = run_context_oracle(
+        train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, ks=(1,), segment_length=20, train_horizon=4,
+        pretrain_steps=3, adapt_lrs=(1e-3,), adapt_checkpoints=(0, 2), batch_size=8, eval_horizons=(5, 20),
+        rail_margin=None, modes=("lag_ctx", "mlp_ctx"), potential_slot=True, cache_dir=tmp_path, log=lambda _: None,
+    )
+    assert result.config["potential_slot"] is True
+    assert np.isfinite(result.metrics["heavy.k1.lag_ctx.dev_h20"])
+
+
+def test_pose_calibration_removes_pose_dependent_bias() -> None:
+    from oracles.pixel_pose import PoseCalibration
+
+    episodes = _synthetic_episodes(4, 400, 1.0, 0)
+    bias = np.stack([0.02 * np.cos(episodes.qpos[..., 1]), 0.05 * np.sin(episodes.qpos[..., 1])], axis=-1)
+    episodes.observed_qpos = episodes.qpos + bias
+    corrected = PoseCalibration(theta_bins=48).fit(episodes).apply(episodes)
+    assert np.abs(corrected.observed_qpos - episodes.qpos).mean() < 0.3 * np.abs(bias).mean()

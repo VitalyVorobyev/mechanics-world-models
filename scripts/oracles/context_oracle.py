@@ -71,7 +71,16 @@ def main() -> None:
     )
     parser.add_argument("--encoder-device", default="mps")
     parser.add_argument(
+        "--debias", action="store_true",
+        help="with --encoder: remove the encoder's per-pose median error, fitted on the nominal training "
+        "episodes with true poses (an oracle calibration, diagnostic only)",
+    )
+    parser.add_argument(
         "--all-frames", action="store_true", help="with --encoder: keep frames where the cart or pole tip is out of view",
+    )
+    parser.add_argument(
+        "--potential-slot", action="store_true",
+        help="4-number contexts; the Lagrangian's 4th slot scales the potential (for gravity shifts)",
     )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
@@ -119,12 +128,20 @@ def main() -> None:
             for (name, e), m in zip(train_envs.items(), args.train_scales)
         }
         shifted = {name: tuple(encode(e, shift_scales.get(name)) for e in parts) for name, parts in shifted.items()}
+        if args.debias:
+            from oracles.pixel_pose import PoseCalibration
+
+            calibration = PoseCalibration().fit(next(iter(train_envs.values())))
+            train_envs = {name: calibration.apply(e) for name, e in train_envs.items()}
+            shifted = {name: tuple(calibration.apply(e) for e in parts) for name, parts in shifted.items()}
+            pose_source += ":debiased"
         print(f"poses from {args.encoder} ({pose_source})", flush=True)
     result = run_context_oracle(
         train_envs, nominal_val, shifted, ks=args.ks, pretrain_steps=args.pretrain_steps, seed=args.seed,
         modes=args.modes, pose_noise=(args.pose_noise[0], math.radians(args.pose_noise[1])),
         shift_scales=shift_scales or None, start_context=args.start_context,
-        train_velocity=args.train_velocity, pose_source=pose_source, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
+        train_velocity=args.train_velocity, pose_source=pose_source,
+        potential_slot=args.potential_slot, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
     path = result.write()
     print(result.summary())

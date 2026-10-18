@@ -51,3 +51,43 @@ def with_encoder_poses(
         qpos=episodes.qpos, qvel=episodes.qvel, actions=episodes.actions, frame_dt=episodes.frame_dt,
         observed_qpos=poses, valid=valid,
     )
+
+
+class PoseCalibration:
+    """Oracle calibration: the encoder's median pose error per (theta, x) bin, fitted on true poses.
+
+    Subtracting it removes the smooth, pose-dependent part of the encoder
+    error (a distorted chart) and keeps the frame-to-frame residual. A
+    diagnostic only: it uses ground truth.
+    """
+
+    def __init__(self, theta_bins: int = 24, x_bins: int = 8, x_range: float = 1.8) -> None:
+        self.theta_bins, self.x_bins, self.x_range = theta_bins, x_bins, x_range
+        self.table = np.zeros((theta_bins, x_bins, 2))
+
+    def _bins(self, qpos: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        theta = np.angle(np.exp(1j * qpos[..., 1]))
+        tb = np.clip(((theta + np.pi) / (2 * np.pi) * self.theta_bins).astype(int), 0, self.theta_bins - 1)
+        xb = np.clip(((qpos[..., 0] + self.x_range) / (2 * self.x_range) * self.x_bins).astype(int), 0, self.x_bins - 1)
+        return tb, xb
+
+    def fit(self, episodes: StateEpisodes, min_count: int = 10) -> "PoseCalibration":
+        err = episodes.observed_qpos - episodes.qpos
+        err[..., 1] = np.angle(np.exp(1j * err[..., 1]))
+        valid = np.ones(err.shape[:-1], dtype=bool) if episodes.valid is None else episodes.valid
+        tb, xb = self._bins(episodes.qpos)
+        for i in range(self.theta_bins):
+            for j in range(self.x_bins):
+                mask = valid & (tb == i) & (xb == j)
+                if mask.sum() >= min_count:
+                    self.table[i, j] = np.median(err[mask], axis=0)
+        return self
+
+    def apply(self, episodes: StateEpisodes) -> StateEpisodes:
+        """Episodes with the binned bias (looked up at the *true* pose) removed from ``observed_qpos``."""
+
+        tb, xb = self._bins(episodes.qpos)
+        return StateEpisodes(
+            qpos=episodes.qpos, qvel=episodes.qvel, actions=episodes.actions, frame_dt=episodes.frame_dt,
+            observed_qpos=episodes.observed_qpos - self.table[tb, xb], valid=episodes.valid,
+        )
