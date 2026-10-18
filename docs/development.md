@@ -19,7 +19,25 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 
 The project targets Python `>=3.10,<3.13`. In practice, Python 3.12 is the safer
 default today because `dm-control` depends on packages that can be awkward to
-build on Python 3.13 on macOS ARM.
+build on Python 3.13 on macOS ARM (as of October 2026 `labmaze` 1.0.6 still
+ships wheels only up to cp312).
+
+To reproduce the exact environment the April 2026 datasets and checkpoints
+were made with (torch 2.11.0, numpy 2.4.4, dm-control 1.0.38, mujoco 3.6.0),
+install from the lock file instead of resolving fresh:
+
+```bash
+uv pip sync --python .venv/bin/python requirements.lock.txt
+uv pip install --python .venv/bin/python --no-deps -e .
+```
+
+`pyproject.toml` only sets lower bounds, so a fresh install pulls newer
+mujoco / dm-control, which can change physics or rendered pixels relative
+to the stored datasets. New collections record `software_versions` and
+`frame_dt` in every episode file. Upgrade torch on a branch: torch 2.14
+rewrote the MPS linear-algebra kernels, and the repo's MPS workarounds
+(`linalg.inv` instead of `linalg.solve`, per-dim `autograd.grad` instead of
+`jvp`) are guarded only by a source-text test, not by an MPS run.
 
 On Linux or other headless machines, MuJoCo may need an explicit offscreen
 backend:
@@ -280,10 +298,32 @@ Resume from the latest checkpoint:
 
 ## Train The Mechanics Model
 
-Run the current cartpole config (the one that emerged from the v2/v3/v4/
-diag debugging documented in [`current_status.md`](current_status.md)).
-`scripts/train_mechanics.sh` holds this verbatim and is what the project
-runs by default:
+### Gate experiment (October 2026, current)
+
+See the review section of [`current_status.md`](current_status.md) for why
+and for the pass criteria. Two training arms plus one evaluation script:
+
+```bash
+bash scripts/train_gate.sh lagrangian   # B_main with pose forced through q
+bash scripts/train_gate.sh mlp          # same encoder/bottleneck, MLP dynamics
+bash scripts/collect_cartpole_ood.sh    # optional: physically consistent OOD-v2 sets
+bash scripts/eval_gate.sh               # both arms + rssm-phase0-reward, same sequences
+```
+
+The gate flags are `--nuisance-mode style --angle-dims 1 --qdot-stencil
+backward --dissipation-form linear` and `--dynamics-form lagrangian|mlp`.
+`--dt` is omitted so it resolves from the dataset (0.02 s). See
+`docs/models/mechanics_world_model.md` for what each flag does. Compare runs
+with `state_probes.q->pose.mlp` and `foreground_open_loop_mse_h20` in each
+`eval/gate/<arm>/<dataset>/metrics.json`.
+
+### April 2026 configuration (historical)
+
+The config that emerged from the v2/v3/v4/diag debugging documented in
+[`current_status.md`](current_status.md). `scripts/train_mechanics.sh`
+holds it verbatim. It passes `--dt 0.01`, which is half the true frame
+interval, and uses the `concat` nuisance mode in which `z` ends up carrying
+the pose:
 
 ```bash
 .venv/bin/train-mechanics \
@@ -341,10 +381,94 @@ two models are directly comparable):
   --sequence-length 32 --warmup-length 5 --horizons 1 5 10
 ```
 
-`metrics.json` additionally carries `linear_probe.q_to_qpos_r2_overall`,
-`linear_probe.qdot_to_qvel_r2_overall` (K2 gate, threshold 0.8) and
-`energy.mean_abs_drift`, `energy.mean_abs_drift_h10` (H3) when the dataset
-carries physics state.
+When the dataset carries physics state, `metrics.json` additionally holds
+`state_probes` (linear + MLP probes from `q`, `q̇`, `z` and their
+concatenations onto `[x, cos θ, sin θ]` and `qvel`, episode-level split —
+the factorization check), the legacy `linear_probe` (raw-angle target; not
+a meaningful gate) and `energy.*` (learned-energy drift, relative
+diagnostic only). Both evaluators also write `copy_last_frame_mse_h*`, and
+`eval-rssm` reports `state_probes` for `h`, `z` and the full RSSM feature.
+Use `--num-sequences 256` so the probes see enough episodes.
+
+OOD physics shifts: use `--physics-scale pole_length=<s>` (MJCF-level, so
+inertia and centre of mass are recompiled) and `body_mass_<i>=<s>` (scales
+mass and inertia together). `geom_size_<i>_<j>` only changes collision and
+rendering, and in the April scripts `geom_size_2_1` pointed at the rail
+`rail2`, not the pole.
+
+### Joint OOD Training (K2 Gauge-Breaking Experiment, historical)
+
+> The April `data/cartpole-ood-*-15k` datasets behind this experiment are
+> physically wrong (rail instead of pole length; mass without inertia).
+> `collect_cartpole_ood.sh` now writes corrected `*-15k-v2` sets; the
+> assemble/train/eval joint scripts still point at the April directories
+> and document what was actually run.
+
+When the nominal-only run fails K2 (as Phase-3 finitediff did — see
+`docs/current_status.md`), the next experiment trains the same mechanics
+architecture on a joint dataset spanning nominal + mildly-perturbed
+physics. The four prep + run scripts:
+
+```bash
+# 1) Collect four mildly-perturbed regimes (~30-50 min on MPS).
+bash scripts/collect_cartpole_ood.sh
+
+# 2) Symlink all episode files into a single joint directory (instant).
+bash scripts/assemble_joint_dataset.sh
+
+# 3) Train on the joint dataset (~18 h on MPS, fresh run).
+bash scripts/train_mechanics_joint.sh
+
+# 4) Evaluate on joint + per-regime (~10 min).
+bash scripts/eval_mechanics_joint.sh
+```
+
+The joint-assembler preserves the `episode_*.npz` prefix so
+`src/data/sequence_dataset.py::index_episode_files` picks up every regime
+in one glob; filenames are globally unique (`episode_{regime}_{idx}.npz`)
+so the val split mixes regimes deterministically.
+
+### Direct H1/H2 Evaluation via MPC (blocked)
+
+> `eval-control` and `CEMPlanner` only support `VisualWorldModel`, so the
+> B_main half of `eval_control_grid.sh` cannot run yet; only the B1 arm
+> works. The grid's length points now use `pole_length`.
+
+When K2 stays broken across nominal + joint runs (as documented in
+`docs/current_status.md`) but the structured model still produces clean
+pixel trajectories, the right move is to test H1 / H2 directly via
+closed-loop MPC return rather than continue chasing K2. Three scripts:
+
+```bash
+# 1) RSSM B1 baseline with reward head (~18 h).
+bash scripts/train_rssm_with_reward.sh
+
+# 2) Mechanics B_main with reward head (~18 h, parallelizable with 1).
+bash scripts/train_mechanics_with_reward.sh
+
+# 3) eval-control grid: 1 nominal + 5 physical-OOD + 5 visual-OOD,
+#    for both checkpoints (~2-4 h total).
+bash scripts/eval_control_grid.sh
+```
+
+`eval-control` requires a checkpoint trained with `--reward-head`. The
+two `*_with_reward.sh` scripts add `--reward-head --reward-weight 1.0
+--imagined-reward-weight 1.0` to the existing baseline configs and
+write to dedicated checkpoint dirs (`checkpoints/{rssm-phase0,
+mechanics-phase3}-reward/`) so they don't collide with the no-reward
+baselines used for offline metrics.
+
+The grid script writes `eval/control-grid/{B1,B_main}/{regime}/returns.json`
+plus a per-run `summary.csv`. Aggregate via:
+
+```bash
+python -c 'import json,glob; [print(p, json.load(open(p)).get("mean_return")) for p in sorted(glob.glob("eval/control-grid/**/returns.json", recursive=True))]'
+```
+
+Tunable knobs at the top of `scripts/eval_control_grid.sh` via env vars
+(`EPISODES`, `HORIZON`, `N_SAMPLES`, `N_ITERS`); the defaults match the
+research-spec CEM/MPC setup (H=15, 512 samples, 3 iters, 10 episodes
+per condition).
 
 ## Plot Training History
 

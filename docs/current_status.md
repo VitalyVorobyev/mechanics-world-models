@@ -1,5 +1,133 @@
 # Current Status and Open Problem
 
+## October 2026 Review (read this first)
+
+The project was paused from 2026-04-19 to 2026-10-18. A review on resume
+(code audit, re-evaluation of the April checkpoints with corrected tooling,
+literature check, and an independent review in `docs/chatgpt-review.md`)
+changed several conclusions below. The April sections are kept as history;
+where they conflict with this section, this section wins.
+
+### Corrected findings
+
+1. **The mechanics branch is bypassed; this is not gauge freedom.** With
+   the new episode-split state probes (`eval/review-2026-10/`, 256 val
+   windows, Phase-3 checkpoint), the pose `[x, cos θ, sin θ]` is
+   recoverable from the *nuisance* channel (`z`: MLP R² 0.89) far better
+   than from `q` (MLP 0.53, linear −0.38). Cause: `z`'s 3-nat free-nats
+   floor makes information in `z` free (its KL sits under the floor ~99% of
+   the time), every nat in `q` is penalized, and the legacy decoder reads
+   `concat(q, q̇, z)` with nothing stopping `z` from carrying pose. In
+   effect B_main was a small VAE whose pose lived in an action-free AR(1)
+   latent. The "gauge freedom" interpretation further down was never
+   tested and is superseded.
+2. **The K2 linear probe was ill-posed.** Its target is the raw, unbounded
+   hinge angle (−31.7…15.6 rad on v2), so no image function can reach
+   R² 0.8. It also used a row-level split over overlapping windows. It is
+   replaced by `state_probes` (see `docs/models/mechanics_world_model.md`).
+3. **K1 comparisons mixed metrics.** On identical sequences (256 val
+   windows, warmup 5) the RSSM with reward head beats Phase-3 everywhere:
+
+   | fg open-loop MSE | h1 | h5 | h10 | h20 |
+   |---|---:|---:|---:|---:|
+   | copy last context frame | 0.00421 | 0.0152 | 0.0178 | 0.0192 |
+   | mechanics Phase-3 | 0.00422 | 0.00783 | 0.00911 | 0.0129 |
+   | RSSM + reward (`rssm-phase0-reward`) | **0.00230** | **0.00312** | **0.00494** | **0.00917** |
+
+   Full-frame h20: RSSM 0.00102 vs mechanics 0.00316. The mechanics model
+   degrades *faster* with horizon (pose in `z` decays as α^h, α ≈ 0.945)
+   and only ties copying at h1. The RSSM latent is also *linearly*
+   probeable for pose (R² 0.93) and partly for velocity (≈ 0.6); no
+   mechanics latent predicts velocity at all. The 2× live-probe vs eval
+   gap came from the live probe using the first 32 windows of one episode
+   with the pole near rest; the probe now samples random windows.
+4. **dt was 2× wrong.** Frames are 0.02 s apart (control timestep 0.01 ×
+   action repeat 2); every mechanics run used `--dt 0.01`. `--dt` now
+   defaults to the dataset value.
+5. **The OOD data was physically wrong.** "Length" runs scaled
+   `geom_size_2_1`, which is the static rail `rail2` (the pole is geom 4),
+   and post-compile geom edits never change inertia anyway — so length07 /
+   length13 changed only a drawn rail. Mass runs scaled the pole mass but
+   not its inertia. The joint "5-regime" run therefore saw 3 dynamics
+   regimes (two of them inconsistent) plus 2 visual variants.
+   `pole_length` (MJCF-level) and inertia-consistent `body_mass_<i>` fix
+   this; recollect with `scripts/collect_cartpole_ood.sh` (writes
+   `*-15k-v2`).
+6. **Path A could not have run.** `eval-control` / `CEMPlanner` only
+   support `VisualWorldModel`; the B_main arm of `eval_control_grid.sh`
+   would crash. Visual OOD there is colour gain/brightness, not
+   Distracting Control. Also, random-policy data has reward > 1 in only
+   0.47% of frames and the CEM horizon is 0.3 s, so a swing-up MPC
+   comparison on this data would likely be noise against noise.
+7. **Smaller issues, now fixed or flagged:** the central-difference `q̇`
+   fed the first open-loop target into the imagination start (fixed:
+   causal start; negligible effect on Phase-3 numbers); `q̇` samples were
+   independent of `q` samples (fixed); the Rayleigh-MLP damping is not
+   provably passive (new `--dissipation-form linear`); the reward head read
+   `z`, contrary to the spec (fixed in `style` mode); the energy-drift
+   metric depends on `V`'s constant and is not compared with true energy
+   (documented); the training recipes for B1 and B_main differ (KL 1.0 vs
+   0.1, LR 3e-4 vs 1e-4); `eval-rssm` could not load reward-head
+   checkpoints (fixed).
+
+### Literature position (late 2026)
+
+The stated novelty ("first systematic OOD evaluation of
+mechanics-structured visual world models") no longer holds as phrased.
+DreamSAC (CVPR 2026, Hamiltonian world model from pixels with physics and
+camera shifts), HaM-World (2026, (q, p, context) + CEM with zero-shot
+physics shifts on DMC incl. cartpole, state input) and PH-Dreamer (2026,
+port-Hamiltonian with dissipation on visual DMC, no OOD) cover adjacent
+ground. Known negative results: Botev et al. 2021 (physics priors add
+little on pixels), KeyCLD 2024 (the Lagrangian prior is weak without
+constraint/keypoint structure), Chen et al. 2022 (learned state variables
+are non-canonical). Baselines a reviewer will require: domain-randomized /
+context-conditioned Dreamer (cRSSM, RLC 2024 — vanilla DreamerV3 fails
+CartPole pole-length extrapolation), DALI (NeurIPS 2025), TD-MPC2. Pixel
+cartpole-swingup is saturated in-distribution (~850+).
+
+There is also a conceptual gap (raised in `docs/chatgpt-review.md`): a
+model trained at one mass has no input that tells it the mass changed, so
+structure alone cannot make it predict a heavier pole correctly. H1 splits
+into **H1a** (structure helps extrapolation to unseen *states* of the same
+system) and **H1b** (structure helps *adapt* to new parameters from a few
+observations), and H1b needs an explicit adaptation or context mechanism
+that the model does not have.
+
+### Verdict and plan
+
+Do not continue the April roadmap (Path A MPC grid, ablations, acrobot).
+The core hypothesis was never tested because the mechanics branch was
+bypassed, so the idea has not failed either. Run one time-boxed gate
+experiment (about two weeks), then either stop and write up the findings
+or re-scope to an analysis question along the lines of "when do mechanical
+priors help visual model-based control?"
+
+**Gate.** `bash scripts/train_gate.sh lagrangian` and
+`bash scripts/train_gate.sh mlp` (pose forced through `q`: `style`
+nuisance, angle dim, causal `q̇`, linear damping, dt = 0.02, reward head).
+Then optionally `bash scripts/collect_cartpole_ood.sh`, then
+`bash scripts/eval_gate.sh`. Continue only if gate-lagrangian:
+
+1. reaches `state_probes.q->pose.mlp` R² > 0.8 on the nominal val split;
+2. has `foreground_open_loop_mse_h20` ≤ the RSSM's on the same sequences
+   (RSSM: 0.00917); and
+3. degrades less than the RSSM at h20 on the OOD-v2 sets,
+
+and beats gate-mlp on 2–3. If the MLP arm matches it, the Lagrangian
+structure is not what helps. Only after a pass: a model-agnostic CEM
+protocol, a dataset that covers upright states (a noisy energy-shaping
+swing-up controller), MPC with true state as an upper bound,
+predicted-vs-realized return to detect model exploitation, planning-time
+benchmarks, and multiple seeds.
+
+**Stop criterion.** If the gate fails, or the structured model only matches
+the MLP arm while costing about 2× per step, stop developing this
+architecture. Write up the debugging trail, the `z`-bypass and probe
+pitfalls, and the OOD-perturbation bug as a technical note.
+
+---
+
 The repository now contains **two trainable world models** — the
 unstructured RSSM baseline (Phase 0) and the mechanics-structured factored
 model (Phase 2/3) — plus the research scaffolding (reward head, CEM/MPC,
@@ -51,9 +179,11 @@ run is ready to execute.
   `qdot_post_mean_abs_max` per training step. Added during the v4
   diagnostic run; these caught the v2/v3 phase-transition and now make
   any regression immediately visible.
-- **Tests and perf.** 127 tests pass (`pytest`). A single-step
-  benchmark harness at `scripts/bench_mechanics_step.py` reports
-  ~780 ms/step on MPS for the default config.
+- **Tests and perf.** 139 tests pass (`pytest`, October 2026; 127 in
+  April). A single-step benchmark harness at
+  `scripts/bench_mechanics_step.py` reports ~780 ms/step on MPS for the
+  default config on synthetic tensors; real runs measured 1.1–2.4 s/step
+  for mechanics vs ≈ 0.6 s/step for the RSSM (file timestamps).
 
 ## What Happened: three rounds of debugging
 
@@ -141,92 +271,235 @@ Greydanus et al. 2019, Toth et al. 2020). Their standard pattern:
   `prior_min_std / dt` (auto-scaling match for the pushforward), so
   `KL(posterior q̇ ‖ prior q̇)` is bounded at init.
 - Encoder requires T ≥ 2; `initial_posterior` / `posterior_step`
-  require 2 consecutive frames (CEM/MPC warmup already satisfies
-  this).
+  require 2 consecutive frames. (The April note that "CEM/MPC warmup
+  already satisfies this" was wrong: the planner never supported this
+  model.)
 
 All 127 tests pass. Smoke test confirms `q̇` matches central diff of
 `q` to machine precision in the interior, all gradients finite.
 Checkpoint dir for the next run: `checkpoints/mechanics-phase3-
 finitediff/`.
 
-## Next Experiments
+## Phase-3 Training: Completed 2026-04-15
 
-```bash
-bash scripts/train_mechanics.sh
-```
+`bash scripts/train_mechanics.sh` ran 10 epochs / 26350 steps / ~18 h
+wall-clock on MPS and finished cleanly. Checkpoint:
+`checkpoints/mechanics-phase3-finitediff/latest.pt`. Training-history
+plot: `checkpoints/mechanics-phase3-finitediff/loss_history.png`.
 
-10 epochs, ~5 h on MPS. The script now carries the v4-discovered
-good-config plus the Phase-3 architecture:
+All Phase-3 architectural predictions verified in the training trace:
 
-```text
---checkpoint-dir checkpoints/mechanics-phase3-finitediff
---q-dim 2 --nuisance-dim 4 --dt 0.01
---kl-weight 0.1
---kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0
---nuisance-min-std 1.0
---learning-rate 1e-4 --warmup-steps 2000
---log-every-steps 50
---val-open-loop-every-steps 100
-```
+| Signal | v4 (old arch, e6) | Phase-3 (final, e10) |
+|---|---:|---:|
+| `val_open_loop_fg_mse_h10` (live probe) | 0.008 | **0.00481** (best 0.00452 at e8) |
+| `qdot_post_mean_abs_max` | **15.4** | **1.10** |
+| `kl_qdot_raw` trajectory | N/A (architectural) | 174.67 → 0.25 (700× drop within e1) |
+| `z_post_mean_rms` (max) | ~1.0 | 2.35 (peak), 1.84 (final) |
+| `smoothness_loss` in history | 13.05 | **absent** (structural) |
+| NaN/Inf skips | 0 | **0 / 530 logged** |
 
-Pass rubric:
+The hard finite-difference constraint held exactly as designed. No
+defensive guardrail (NaN skip, tanh-squashed MLP inputs) tripped.
 
-- `val_open_loop_fg_mse_h10` ≤ 0.008 by epoch 6 (match or beat v4).
-- `qdot_post_mean_abs_max` stays bounded (it now physically cannot
-  exceed ~`q_post_mean_abs_max / dt`, which should be well-behaved).
-- `kl_qdot_raw` starts high (~200 from the pushforward mismatch
-  against an untrained integrator) and drops as the integrator
-  learns to match the observed velocity trajectory.
-- No `smoothness_loss` in history (correctly absent).
+## Phase-3 Evaluation: K1 Marginal, K2 Hard Fail
 
-Once training finishes, run the full K1 + K2 + H3 eval on the
-recollected-with-physics dataset:
+`bash scripts/eval_mechanics.sh` on `data/cartpole-swingup-random-100k-v2`
+with warmup 5 and 64 random sequences wrote
+`eval/mechanics-phase3-finitediff/metrics.json`:
 
-```bash
-.venv/bin/eval-mechanics \
-  --checkpoint-path checkpoints/mechanics-phase3-finitediff/latest.pt \
-  --dataset-dir data/cartpole-swingup-random-100k-v2 \
-  --output-dir eval/mechanics-phase3-finitediff \
-  --sequence-length 32 --warmup-length 5 --horizons 1 5 10
-```
+| Gate | Metric | Target | Result |
+|---|---|---:|---:|
+| K1 | `foreground_open_loop_mse_h10` | ≤ 0.008 | **0.00892** (marginal miss; 0.00481 on the live probe with warmup 4) |
+| K1 | `open_loop_mse_h10` (full-frame) | — | **0.00128** (excellent) |
+| K1 | `foreground_reconstruction_mse` | — | **0.00288** |
+| K2 | `linear_probe.q_to_qpos_r2_overall` | > 0.8 | **0.102** (per-dim 0.110 / 0.064) |
+| K2 | `linear_probe.qdot_to_qvel_r2_overall` | > 0.8 | **0.006** (per-dim 0.043 / −0.004) |
+| H3 | `energy.mean_abs_drift_h10` | bounded | 0.103 (uninterpretable without B2 no-D comparison) |
 
-The critical measurement is `linear_probe.qdot_to_qvel_r2_overall`.
-Under the old architecture this was structurally doomed. Under the
-finite-diff constraint, if q tracks physical position then `q̇` is
-the time derivative of that quantity, which *is* physical velocity
-up to a linear transform. If R² > 0.8, the factorization is real and
-Phase 4 (OOD grid) opens up.
+**Pixel trajectory is tracked well in open-loop** (contact sheets show
+the cart and pole staying on-manifold for 20+ steps), but the encoder's
+`q` has essentially **zero linear relation to physical cart position /
+pole angle**. The failure is not at the pixel-prediction level; it is
+at the coordinate-interpretation level.
 
-The 100k dataset has been recollected at
-`data/cartpole-swingup-random-100k-v2` with automatic qpos/qvel
-serialization (identical image trajectories since collection is
-deterministic with seed 0; only extra physics-state arrays are new).
-The old dataset at `data/cartpole-swingup-random-100k` stays on disk
-for backwards-compatibility.
+## Interpretation: This Is Gauge Freedom, Not Posterior Collapse
 
-## Pending Follow-ups
+> **Superseded (October 2026):** probes on `z` show the pose lives in the
+> nuisance channel and `q` has nearly collapsed — an information-routing
+> failure, not a chart ambiguity. See the review section at the top.
 
-- **Smoothness-weight tuning is no longer a knob to turn.** The
-  constraint is architectural. If the Phase-3 run converges, we have
-  a real structured model; if not, the next step is Option B (Dreamer-
-  style posterior fusion with Kalman interpretation) not weight
-  tuning.
-- **Phase 3 ablations and Phase 4 OOD grid.** Everything behind the
-  first successful `eval-mechanics` run on the recollected dataset.
-- **B2 (no-dissipation) ablation**: `--no-dissipation` flag on the
-  mechanics model. Tests H3.
-- **B3 (unfactored LNN+D) and B4 (contrastive) ablations.** Both
-  still `TODO`.
+The Lagrangian framework is **invariant under diffeomorphic change of
+coordinates**. For any smooth bijection φ : q → q', the equations of
+motion look the same with `M' = J(φ)^T M J(φ)`, `V' = V ∘ φ⁻¹`, etc.
+The four learned primitives (`M, V, D, B`) are flexible MLPs and can
+absorb any such reparameterization. So the encoder + integrator pair
+has a large gauge orbit of pixel-equivalent solutions, and SGD lands
+on one that fits the data but does not happen to be the physical one.
+
+The training-side signals — `kl_qdot_raw → 0.25`, `qdot_max` bounded —
+confirm the encoder's `q̇` is consistent with its own `q` (that is what
+the Phase-3 finite-diff constraint guarantees) and with the learned
+integrator. They do **not** constrain which coordinate chart `q` lives
+in.
+
+The consequence for the research plan is that **Option B (Kalman-style
+posterior fusion) solves posterior collapse, not coordinate
+identifiability**. Posterior fusion ties the encoder to the integrator's
+preferred coordinates, but the integrator itself has the same gauge
+freedom, so the fused system can still settle into any chart. Before
+committing to Option B as the fix, we need to either (i) accept that K2
+might not be the right paper-gate and reframe around pixel-accuracy +
+OOD generalization, or (ii) add a mechanism that *breaks* the
+diffeomorphism-invariance of the Lagrangian form.
+
+## What Might Break The Gauge: Candidate Next Steps
+
+The problem is identifiability, so the fix has to inject external
+structure about what `q` should mean. Options in rough order of
+research-expense and plausibility on cartpole:
+
+1. **Reconstruction-conditioned decoder.** Currently the decoder sees
+   `concat(q, q̇, z)`, which lets `z` absorb the absolute pose while
+   `q` encodes something else. Forcing the decoder to place the
+   cartpole at a position *linearly read from `q`* (e.g., a
+   differentiable-renderer or small-CNN decoder that takes `q` as a
+   pose parameter) would make q-chart untenable if it is not the
+   physical chart. **Most principled but also the most implementation.**
+2. **Contrastive keypoint supervision (KeyCLD-style, CoRL 2021).**
+   Add a keypoint-detection head trained (self-supervised) to predict
+   cartpole keypoints in image space; regress `q` against those
+   keypoints. Breaks diffeomorphism because image-space keypoint
+   coords have a canonical meaning. **Changes the model but not the
+   Lagrangian math.**
+3. **OOD-dataset training.** Collect a small perturbed-physics
+   dataset and train on the joint. If the encoder is a physical
+   coordinate, physics perturbations move `V(q)` / `M(q)` in
+   predictable ways; if not, reconstruction on perturbed data breaks.
+   This tests H1 *during* training rather than after. Cheapest —
+   just a data pipeline change.
+4. **Explicit canonical-form constraint.** Penalize deviation from a
+   diagonal mass matrix, or fix `B(q) = const` (cartpole's actuator
+   is constant), to pin a gauge. Speculative; may over-constrain.
+5. **Option B — Dreamer/Kalman-style posterior fusion.** Still worth
+   trying *after* a gauge-breaking mechanism is in place, to sharpen
+   the posterior. Not a standalone fix for K2 — see interpretation
+   above.
+
+## Joint OOD-Dataset Training (Option 3): Completed 2026-04-16
+
+> **Caveat (October 2026):** the length07 / length13 regimes scaled the
+> static rail `rail2`, not the pole, and the mass regimes did not scale the
+> pole inertia. This run saw 3 dynamics regimes plus 2 visual variants of
+> nominal, so it is not evidence about robustness to length changes.
+
+7 epochs of `scripts/train_mechanics_joint.sh` on the 5-regime joint
+dataset (`data/cartpole-joint-v3` ≈ 320 episodes / 160k frames),
+followed by `scripts/eval_mechanics_joint.sh`. Outcome: **K1 improved
+across the board, K2 still cleanly failed**.
+
+| Metric | Phase-3 (nominal-only, e10) | Joint (5 regimes, e7) | Δ |
+|---|---:|---:|---|
+| `foreground_open_loop_mse_h10` (K1) | 0.00892 | **0.00738** | −17% |
+| `reconstruction_mse` | 0.00045 | **0.00028** | −37% |
+| `energy.mean_abs_drift_h10` (H3) | 0.103 | **0.057** | −45% |
+| `q_to_qpos_r2_overall` (K2) | 0.102 | **0.030** | −70% |
+| `qdot_to_qvel_r2_overall` (K2) | 0.006 | **0.081** | +1228% (still ≪ 0.8) |
+
+Per-regime evals (`eval/mechanics-joint-v3-*/metrics.json`):
+
+| Per-regime | `fg_h10` | `q→qpos R²` | `qdot→qvel R²` |
+|---|---:|---:|---:|
+| nominal v2 | 0.00792 | 0.092 | −0.012 |
+| mass07 | 0.00792 | 0.052 | 0.258 |
+| mass13 | 0.00875 | 0.127 | 0.026 |
+| length07 | 0.00868 | 0.020 | 0.098 |
+| length13 | 0.00713 | 0.048 | 0.069 |
+
+No regime has a meaningfully better R² than the others. The strongest
+per-dim per-regime fit (`qdot_to_qvel` dim 0 on mass07: 0.31) is still
+far from "this is a linear reparameterization of physical velocity."
+**The Lagrangian gauge orbit is robust to ±30% physics perturbations**
+— the encoder + dynamics pair can absorb the regime variation by
+reparameterizing `M, V, B` instead of by adopting a physical `q`.
+
+Joint training was a real improvement on every pixel-level signal —
+the model fits 5 physics regimes simultaneously, with sharper
+reconstruction and more stable symplectic integration. It just doesn't
+do so via physical coordinates.
+
+## Reframe: K2 May Not Be the Right Paper-Gate
+
+The research spec's hypotheses (H1 physical-OOD, H2 visual-OOD) are
+about **MPC return under shift**, not about whether the latent is
+linearly equivalent to physical coordinates. K2 was adopted as a
+stricter proxy on the assumption that "physical coordinates make OOD
+generalization easier." But two trained checkpoints now demonstrate
+that the structured model produces **excellent pixel trajectories on
+multiple physics regimes** — exactly what MPC needs — even with K2
+near zero. The next step that actually advances the paper is to
+evaluate H1/H2 directly on the closed-loop MPC return, not to keep
+chasing K2.
+
+## Next Experiment: Direct H1/H2 via MPC (Path A)
+
+> **Superseded (October 2026):** `eval-control` cannot run the mechanics
+> model, and the "length" OOD regimes only rescaled a rail. The RSSM reward
+> run finished (≈ 5 h, stopped in epoch 11 of 20); the mechanics reward run
+> and the grid never ran. Replaced by the gate experiment at the top.
+
+Three new scripts, syntax-clean, awaiting execution:
+
+| Script | Purpose | Wall-clock |
+|---|---|---|
+| `scripts/train_rssm_with_reward.sh` | Retrains B1 (RSSM Phase-0) on `data/cartpole-swingup-random-100k-v2` with `--reward-head --reward-weight 1.0 --imagined-reward-weight 1.0`. Output: `checkpoints/rssm-phase0-reward/` | ~18 h |
+| `scripts/train_mechanics_with_reward.sh` | Same Phase-3 mechanics architecture + reward head + reward weights, on the v2 dataset. Output: `checkpoints/mechanics-phase3-reward/` | ~18 h |
+| `scripts/eval_control_grid.sh` | `eval-control` grid: 1 nominal + 5 physical-OOD (mass×{0.5,1.5,2.0}, length×{0.5,1.5}) + 5 visual-OOD (color gain / brightness) × 2 models. Outputs `eval/control-grid/{B1,B_main}/{regime}/returns.json` | ~2–4 h |
+
+Both training runs can go in parallel if you have spare compute. Both
+also support `--auto-resume`.
+
+**Pass / fail logic for the eval-control grid:**
+
+| Result | Verdict | Next |
+|---|---|---|
+| B_main MPC return ≥ B1 on nominal AND on every physical-OOD point | H1 supported | Move to H2 visual-OOD; if also supported, paper draft |
+| B_main wins on nominal but degrades faster than B1 on OOD | H1 falsified for these envs | Quantify how much faster; honest negative result. K2 was a real warning sign |
+| B_main loses to B1 even on nominal | Lagrangian prior hurts pixel-MPC throughput | Inspect reward-head training (perhaps reward MLP underfits given the latent structure) |
+| B_main wins by a lot OOD but K2 still 0 | Best paper outcome scientifically: "physical coordinates aren't necessary for OOD generalization, but mechanics structure is" | Highlight in paper; explains why K2 is a misleading sanity check |
+
+## Orthogonal Pending Follow-ups
+
+- **B2 (no-dissipation) ablation** for H3, regardless of Path A
+  outcome — one `--no-dissipation` training run + eval. Cheapest
+  ablation. Should run alongside the reward-head models.
+- **B3 (unfactored LNN+D) and B4 (contrastive) ablations.** Still
+  TODO. B3 is more interesting now: it shares the same gauge orbit
+  as B_main, so if B_main wins H1/H2 and B3 doesn't, the q/z split
+  is the operative inductive bias rather than the canonical `q`.
+- **K1 eval-vs-probe gap** on Phase-3 (0.0089 eval vs 0.0048 live
+  probe at matching horizons) — closed by the joint run (0.0074) but
+  the discrepancy is unexplained; worth a quick `--warmup-length 4
+  --num-sequences 256` rerun if you want to nail it down.
+- **Path B (keypoint contrastive supervision)** stays on the table.
+  If Path A's eval-control grid shows B_main losing to B1 even on
+  nominal (i.e., the structured model is just bad at MPC), Path B is
+  the next move — anchor `q` to image-space keypoints to force
+  physical coordinates and retest.
 
 ## What This Means for the Research Plan
 
-The plan is still intact. We have climbed two hills:
+Three hills climbed; one uncovered; reframe to test the actual
+research-spec hypotheses directly.
 
 1. **Stable training of the structured model** (v4): cleared.
-2. **Real (not nominal) factorization** (Phase-3 finite-diff):
-   architecture committed, pending an end-to-end training run.
-
-The K2 linear probe is the next measurement. It is the gate between
-"structured model trains" and "structured model actually captures
-physics." Everything downstream (OOD generalization, ablations,
-paper) depends on it.
+2. **Self-consistent factorization** (Phase-3 finite-diff): cleared —
+   `q̇ = d/dt(q)` by construction, integrator tracks it, no drift.
+3. **Multi-regime pixel prediction** (joint, Option 3): cleared
+   convincingly. The structured model handles 5 physics regimes
+   simultaneously with better pixel accuracy than nominal-only.
+4. **Physical-coordinate factorization** (K2 linear probe): **not
+   cleared** by either checkpoint. Shown to be robust to ±30%
+   perturbations. May not be the right gate; the research spec's H1/H2
+   are about MPC return, not coordinate identifiability.
+5. **Direct H1/H2 evaluation** (Path A): scripts in place; awaiting
+   user execution. This is the actual research result.

@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader, Subset
 
 from data import EpisodeSequenceDataset, ImageCropConfig
 from data.image_transforms import add_crop_args, crop_config_from_args, crop_config_from_mapping
+from eval.probes import run_state_probes, state_probe_summary_rows
 from models import VisualWorldModel, compute_latent_consistency_loss, foreground_reconstruction_mask
 from train.train_rssm import resolve_device, set_seed
 from viz.rssm_eval_viz import (
@@ -45,6 +46,7 @@ class EvalConfig:
     num_visualizations: int = 3
     video_fps: int = 6
     sheet_timesteps: int = 8
+    target_angle_dims: tuple[int, ...] = (1,)
     crop_config: ImageCropConfig | None = None
 
 
@@ -55,6 +57,8 @@ class EvalRollout:
     reconstructions: torch.Tensor
     one_step_predictions: torch.Tensor
     open_loop_predictions: torch.Tensor
+    # Deterministic posterior features ``[B, T, H + Z]`` (``cat(h, z)``).
+    posterior_features: torch.Tensor | None = None
 
 
 @dataclass
@@ -108,6 +112,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-visualizations", type=int, default=3)
     parser.add_argument("--video-fps", type=int, default=6)
     parser.add_argument("--sheet-timesteps", type=int, default=8)
+    parser.add_argument(
+        "--target-angle-dims",
+        type=int,
+        nargs="*",
+        default=[1],
+        help="physics_qpos dims probed as (cos, sin); default 1 = cartpole hinge",
+    )
     add_crop_args(parser, default_mode=None)
     return parser
 
@@ -132,6 +143,7 @@ def config_from_args(args: argparse.Namespace) -> EvalConfig:
         num_visualizations=args.num_visualizations,
         video_fps=args.video_fps,
         sheet_timesteps=args.sheet_timesteps,
+        target_angle_dims=tuple(args.target_angle_dims),
         crop_config=crop_config_from_args(args),
     )
 
@@ -197,16 +209,20 @@ def evaluate_checkpoint(config: EvalConfig, console: Console | None = None) -> d
         f"horizons={config.horizons} crop={crop_config}",
     )
 
-    metrics = evaluate_loader(
-        model=model,
-        loader=loader,
-        device=device,
-        warmup_length=config.warmup_length,
-        horizons=config.horizons,
-        output_dir=config.output_dir,
-        num_visualizations=config.num_visualizations,
-        video_fps=config.video_fps,
-        sheet_timesteps=config.sheet_timesteps,
+    collected: dict[str, list[np.ndarray]] = {}
+    metrics: dict[str, Any] = dict(
+        evaluate_loader(
+            model=model,
+            loader=loader,
+            device=device,
+            warmup_length=config.warmup_length,
+            horizons=config.horizons,
+            output_dir=config.output_dir,
+            num_visualizations=config.num_visualizations,
+            video_fps=config.video_fps,
+            sheet_timesteps=config.sheet_timesteps,
+            collector=collected,
+        ),
     )
     metrics.update(
         {
@@ -215,6 +231,17 @@ def evaluate_checkpoint(config: EvalConfig, console: Console | None = None) -> d
             "warmup_length": float(config.warmup_length),
         },
     )
+    if collected.get("physics_qpos"):
+        features = np.concatenate(collected["posterior_features"], axis=0)
+        hidden = model.rssm.hidden_size
+        metrics["state_probes"] = run_state_probes(
+            {"h": features[..., :hidden], "z": features[..., hidden:], "full": features},
+            np.concatenate(collected["physics_qpos"], axis=0),
+            np.concatenate(collected["physics_qvel"], axis=0),
+            [dataset.sequence_index[i].episode_index for i in selected_indices],
+            target_angle_dims=config.target_angle_dims,
+            seed=config.seed,
+        )
     write_metrics(config.output_dir / "metrics.json", metrics, config, selected_indices, crop_config)
     print_metrics_table(console, metrics)
     return metrics
@@ -231,8 +258,14 @@ def evaluate_loader(
     num_visualizations: int,
     video_fps: int,
     sheet_timesteps: int,
+    collector: dict[str, list[np.ndarray]] | None = None,
 ) -> dict[str, float]:
-    """Evaluate batches and optionally write sequence-level diagnostics."""
+    """Evaluate batches and optionally write sequence-level diagnostics.
+
+    When ``collector`` is given, per-batch posterior features and (if the
+    dataset has them) ``physics_qpos`` / ``physics_qvel`` are appended to it
+    for the state probes.
+    """
 
     model.eval()
     metrics: dict[str, MetricAccumulator] = {
@@ -245,6 +278,8 @@ def evaluate_loader(
     for horizon in horizons:
         metrics[f"open_loop_mse_h{horizon}"] = MetricAccumulator()
         metrics[f"foreground_open_loop_mse_h{horizon}"] = MetricAccumulator()
+        metrics[f"copy_last_frame_mse_h{horizon}"] = MetricAccumulator()
+        metrics[f"foreground_copy_last_frame_mse_h{horizon}"] = MetricAccumulator()
     latent_consistency_loss_total = 0.0
     latent_consistency_batches = 0
     compute_latent_metric = bool(getattr(model, "latent_predictor_loaded", True))
@@ -288,6 +323,7 @@ def evaluate_loader(
             next_observations[:, open_loop_start:],
             prediction_mask[:, open_loop_start:],
         )
+        last_context_frame = observations[:, warmup_length - 1]
         for horizon in horizons:
             timestep = warmup_length + horizon - 2
             metrics[f"open_loop_mse_h{horizon}"].update(
@@ -299,6 +335,23 @@ def evaluate_loader(
                 next_observations[:, timestep],
                 prediction_mask[:, timestep],
             )
+            metrics[f"copy_last_frame_mse_h{horizon}"].update(
+                last_context_frame, next_observations[:, timestep],
+            )
+            metrics[f"foreground_copy_last_frame_mse_h{horizon}"].update(
+                last_context_frame, next_observations[:, timestep], prediction_mask[:, timestep],
+            )
+        if collector is not None and rollout.posterior_features is not None:
+            collector.setdefault("posterior_features", []).append(
+                rollout.posterior_features.detach().cpu().double().numpy(),
+            )
+            if "physics_qpos" in batch and "physics_qvel" in batch:
+                collector.setdefault("physics_qpos", []).append(
+                    batch["physics_qpos"].double().numpy(),
+                )
+                collector.setdefault("physics_qvel", []).append(
+                    batch["physics_qvel"].double().numpy(),
+                )
 
         if saved_visualizations < num_visualizations:
             saved_visualizations = write_batch_visualizations(
@@ -345,6 +398,7 @@ def deterministic_eval_rollout(
         reconstructions=model.decoder(posterior_features),
         one_step_predictions=model.decoder(next_prior_features),
         open_loop_predictions=model.decoder(open_loop_features),
+        posterior_features=posterior_features,
     )
 
 
@@ -513,6 +567,8 @@ def load_model_from_checkpoint(
         hidden_size=int(checkpoint_config.get("hidden_size", 128)),
         latent_size=int(checkpoint_config.get("latent_size", 32)),
         image_size=image_size,
+        reward_head=bool(checkpoint_config.get("reward_head", False)),
+        reward_head_hidden_size=int(checkpoint_config.get("reward_head_hidden_size", 200)),
     ).to(device)
     missing, unexpected = model.load_state_dict(checkpoint["model_state"], strict=False)
     missing_latent_predictor = [name for name in missing if name.startswith("latent_predictor.")]
@@ -598,7 +654,7 @@ def validate_eval_config(config: EvalConfig, sequence_length: int) -> None:
 
 def write_metrics(
     path: Path,
-    metrics: dict[str, float],
+    metrics: dict[str, Any],
     config: EvalConfig,
     selected_indices: Sequence[int],
     crop_config: ImageCropConfig,
@@ -628,14 +684,21 @@ def serializable_eval_config(config: EvalConfig) -> dict[str, Any]:
     return values
 
 
-def print_metrics_table(console: Console, metrics: dict[str, float]) -> None:
+def print_metrics_table(console: Console, metrics: dict[str, Any]) -> None:
     """Print a compact Rich table with evaluation metrics."""
 
     table = Table(title="RSSM Evaluation Metrics")
     table.add_column("metric", style="cyan")
     table.add_column("value", justify="right")
     for key in sorted(metrics):
-        table.add_row(key, f"{metrics[key]:.8f}")
+        value = metrics[key]
+        if key == "state_probes":
+            for name, r2 in state_probe_summary_rows(value):
+                table.add_row(f"{name} R²", f"{r2:.4f}")
+        elif isinstance(value, (int, float)):
+            table.add_row(key, f"{value:.8f}")
+        else:
+            table.add_row(key, str(value))
     console.print(table)
 
 

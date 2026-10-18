@@ -5,11 +5,17 @@ side-by-side: same JSON metric layout, same video / contact-sheet artifacts.
 On top of those, this evaluator also runs the two non-training diagnostics
 that are specific to the mechanics model:
 
-* a held-out OLS linear probe from encoded ``q`` / ``qdot`` onto the
-  simulator's stored ``physics_qpos`` / ``physics_qvel``, reporting R²
-  per branch — the K2 factorization gate; and
+* ``state_probes``: linear and MLP probes from ``q``, ``q̇``, ``z`` and their
+  concatenations onto cart position + ``(cos, sin)`` pole angle and onto
+  ``qvel``, with an episode-level split (see ``eval.probes``);
+* ``linear_probe``: the legacy OLS ``q -> raw qpos`` / ``q̇ -> qvel`` probe,
+  kept for comparability with the April 2026 numbers. Its raw-angle target
+  is unbounded, so it is not a meaningful gate on its own; and
 * learned energy ``E = T(q, qdot) + V(q)`` over open-loop rollouts,
-  reporting normalized drift — the secondary diagnostic for H3.
+  reporting normalized drift — a relative diagnostic only.
+
+Open-loop MSEs are reported next to a copy-last-context-frame baseline
+(``copy_last_frame_mse_h*``) so "better than doing nothing" is visible.
 
 Probes are skipped automatically when the dataset has no ``physics_qpos``
 fields (e.g. legacy collections), so legacy datasets still produce the
@@ -42,9 +48,12 @@ from eval.probes import (
     fit_linear_probe,
     flatten_target,
     normalized_energy_drift,
+    run_state_probes,
+    state_probe_summary_rows,
 )
 from models.losses import foreground_reconstruction_mask
 from models.mechanics import MechanicsWorldModel
+from models.mechanics.coordinates import embed_coordinates
 from train.train_mechanics import resolve_device, set_seed
 from viz.rssm_eval_viz import (
     evenly_spaced_timesteps,
@@ -74,6 +83,7 @@ class MechanicsEvalConfig:
     video_fps: int = 6
     sheet_timesteps: int = 8
     skip_probes: bool = False
+    target_angle_dims: tuple[int, ...] = (1,)
     crop_config: ImageCropConfig | None = None
 
 
@@ -100,6 +110,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable the linear-probe and energy-tracking diagnostics",
     )
+    parser.add_argument(
+        "--target-angle-dims",
+        type=int,
+        nargs="*",
+        default=[1],
+        help="physics_qpos dims probed as (cos, sin); default 1 = cartpole hinge",
+    )
     add_crop_args(parser, default_mode=None)
     return parser
 
@@ -123,6 +140,7 @@ def config_from_args(args: argparse.Namespace) -> MechanicsEvalConfig:
         video_fps=args.video_fps,
         sheet_timesteps=args.sheet_timesteps,
         skip_probes=args.skip_probes,
+        target_angle_dims=tuple(args.target_angle_dims),
         crop_config=crop_config_from_args(args),
     )
 
@@ -224,14 +242,34 @@ def evaluate_checkpoint(
                 rollouts["q"], rollouts["qdot"],
                 rollouts["physics_qpos"], rollouts["physics_qvel"],
             )
-        metrics["energy"] = run_energy_tracking(
-            model=model,
-            imagined_q=rollouts["imagined_q"],
-            imagined_qdot=rollouts["imagined_qdot"],
-            posterior_q=rollouts["posterior_q_warm"],
-            posterior_qdot=rollouts["posterior_qdot_warm"],
-            warmup_length=config.warmup_length,
-        )
+            q_features = rollouts["q_features"]
+            latents = {
+                "q": q_features,
+                "qdot": rollouts["qdot"],
+                "z": rollouts["z"],
+                "q_qdot": np.concatenate([q_features, rollouts["qdot"]], axis=-1),
+                "q_z": np.concatenate([q_features, rollouts["z"]], axis=-1),
+                "full": np.concatenate(
+                    [q_features, rollouts["qdot"], rollouts["z"]], axis=-1,
+                ),
+            }
+            metrics["state_probes"] = run_state_probes(
+                latents,
+                rollouts["physics_qpos"],
+                rollouts["physics_qvel"],
+                [dataset.sequence_index[i].episode_index for i in indices],
+                target_angle_dims=config.target_angle_dims,
+                seed=config.seed,
+            )
+        if model.dynamics_form == "lagrangian":  # the MLP baseline has no energy
+            metrics["energy"] = run_energy_tracking(
+                model=model,
+                imagined_q=rollouts["imagined_q"],
+                imagined_qdot=rollouts["imagined_qdot"],
+                posterior_q=rollouts["posterior_q_warm"],
+                posterior_qdot=rollouts["posterior_qdot_warm"],
+                warmup_length=config.warmup_length,
+            )
 
     write_metrics(config.output_dir / "metrics.json", metrics, config, indices, crop_config)
     print_metrics_table(console, metrics)
@@ -261,10 +299,13 @@ def evaluate_loader(
     fg_open_loop_se = _MetricAcc()
     per_horizon_se: dict[int, _MetricAcc] = {h: _MetricAcc() for h in horizons}
     per_horizon_fg_se: dict[int, _MetricAcc] = {h: _MetricAcc() for h in horizons}
-    smoothness_se = _MetricAcc()
+    copy_se: dict[int, _MetricAcc] = {h: _MetricAcc() for h in horizons}
+    copy_fg_se: dict[int, _MetricAcc] = {h: _MetricAcc() for h in horizons}
 
     factor_q: list[np.ndarray] = []
+    factor_q_features: list[np.ndarray] = []
     factor_qdot: list[np.ndarray] = []
+    factor_z: list[np.ndarray] = []
     physics_qpos: list[np.ndarray] = []
     physics_qvel: list[np.ndarray] = []
     imagined_q_chunks: list[np.ndarray] = []
@@ -305,9 +346,14 @@ def evaluate_loader(
         imagined_qdot = imagined_qdot.detach()
 
         target = next_observations[:, target_start : target_start + max_horizon]
-        fg_mask_pred = foreground_reconstruction_mask(target).detach()
+        # Mask built over the full next-frame window and then sliced, exactly
+        # like eval-rssm, because the background estimate is batch-dependent.
+        fg_mask_pred = foreground_reconstruction_mask(next_observations).detach()[
+            :, target_start : target_start + max_horizon
+        ]
         open_loop_se.update(imagined_recon, target)
         fg_open_loop_se.update(imagined_recon, target, fg_mask_pred)
+        last_context_frame = observations[:, warmup_length - 1]
 
         for horizon in horizons:
             if horizon - 1 >= imagined_recon.shape[1]:
@@ -319,17 +365,19 @@ def evaluate_loader(
                 imagined_recon[:, horizon - 1], target[:, horizon - 1],
                 fg_mask_pred[:, horizon - 1],
             )
+            copy_se[horizon].update(last_context_frame, target[:, horizon - 1])
+            copy_fg_se[horizon].update(
+                last_context_frame, target[:, horizon - 1], fg_mask_pred[:, horizon - 1],
+            )
 
-        # Smoothness diagnostic: how close encoded qdot is to the finite
-        # difference of encoded q. Reported as the same MSE the trainer uses.
         posterior = model.encoder(observations)
-        finite_diff = (posterior.q_mean[:, 1:] - posterior.q_mean[:, :-1]) / model.dt
-        midpoint = 0.5 * (posterior.qdot_mean[:, 1:] + posterior.qdot_mean[:, :-1])
-        smoothness_se.update(midpoint, finite_diff)
-
         if collect_factors:
             factor_q.append(_to_double_numpy(posterior.q_mean))
+            factor_q_features.append(
+                _to_double_numpy(embed_coordinates(posterior.q_mean, model.angle_dims)),
+            )
             factor_qdot.append(_to_double_numpy(posterior.qdot_mean))
+            factor_z.append(_to_double_numpy(posterior.z_mean))
             posterior_q_warm_chunks.append(
                 _to_double_numpy(posterior.q_mean[:, warmup_length - 1 : warmup_length])
             )
@@ -360,17 +408,20 @@ def evaluate_loader(
         "foreground_reconstruction_mse": fg_recon_se.mean(),
         "open_loop_future_mse": open_loop_se.mean(),
         "foreground_open_loop_future_mse": fg_open_loop_se.mean(),
-        "qdot_smoothness_mse": smoothness_se.mean(),
     }
     for horizon, acc in per_horizon_se.items():
         if acc.count > 0:
             metrics[f"open_loop_mse_h{horizon}"] = acc.mean()
             metrics[f"foreground_open_loop_mse_h{horizon}"] = per_horizon_fg_se[horizon].mean()
+            metrics[f"copy_last_frame_mse_h{horizon}"] = copy_se[horizon].mean()
+            metrics[f"foreground_copy_last_frame_mse_h{horizon}"] = copy_fg_se[horizon].mean()
 
     return {
         "metrics": metrics,
         "q": np.concatenate(factor_q, axis=0) if factor_q else None,
+        "q_features": np.concatenate(factor_q_features, axis=0) if factor_q_features else None,
         "qdot": np.concatenate(factor_qdot, axis=0) if factor_qdot else None,
+        "z": np.concatenate(factor_z, axis=0) if factor_z else None,
         "physics_qpos": np.concatenate(physics_qpos, axis=0) if physics_qpos else None,
         "physics_qvel": np.concatenate(physics_qvel, axis=0) if physics_qvel else None,
         "imagined_q": (
@@ -492,9 +543,18 @@ def load_mechanics_model_from_checkpoint(
             checkpoint_config.get("dynamics_hidden_layers", 2),
         ),
         image_size=image_size,
-        dt=float(checkpoint_config.get("dt", 0.01)),
+        # Checkpoints from before dt resolution stored the then-default 0.01.
+        dt=float(checkpoint_config.get("dt") or 0.01),
         n_substeps=int(checkpoint_config.get("n_substeps", 1)),
         with_dissipation=bool(checkpoint_config.get("with_dissipation", True)),
+        mech_min_std=float(checkpoint_config.get("mech_min_std", 0.05)),
+        nuisance_min_std=float(checkpoint_config.get("nuisance_min_std", 0.1)),
+        qdot_stencil=str(checkpoint_config.get("qdot_stencil", "central")),
+        angle_dims=tuple(int(d) for d in checkpoint_config.get("angle_dims", [])),
+        nuisance_mode=str(checkpoint_config.get("nuisance_mode", "concat")),
+        dynamics_form=str(checkpoint_config.get("dynamics_form", "lagrangian")),
+        dissipation_form=str(checkpoint_config.get("dissipation_form", "rayleigh_mlp")),
+        mlp_dynamics_hidden_size=int(checkpoint_config.get("mlp_dynamics_hidden_size", 128)),
         nuisance_alpha_init=float(
             checkpoint_config.get("nuisance_alpha_init", 0.95),
         ),
@@ -603,7 +663,10 @@ def print_metrics_table(console: Console, metrics: dict[str, Any]) -> None:
     table.add_column("value", justify="right")
     for key in sorted(metrics):
         value = metrics[key]
-        if isinstance(value, float):
+        if key == "state_probes":
+            for name, r2 in state_probe_summary_rows(value):
+                table.add_row(f"{name} R²", f"{r2:.4f}")
+        elif isinstance(value, float):
             table.add_row(key, f"{value:.6f}")
         elif isinstance(value, int):
             table.add_row(key, str(value))

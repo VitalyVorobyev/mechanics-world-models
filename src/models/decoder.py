@@ -44,6 +44,11 @@ class ImageDecoder(nn.Module):
             Reconstructed observations shaped ``[B, T, C, H, W]`` in ``[0, 1]``.
         """
 
+        return torch.sigmoid(self.decode_logits(features))
+
+    def decode_logits(self, features: torch.Tensor) -> torch.Tensor:
+        """Pre-sigmoid decoder output shaped ``[B, T, C, H, W]``."""
+
         if features.ndim != 3:
             raise ValueError("features must have shape [B, T, F]")
 
@@ -58,8 +63,7 @@ class ImageDecoder(nn.Module):
                 mode="bilinear",
                 align_corners=False,
             )
-        reconstructions = torch.sigmoid(decoded)
-        return reconstructions.reshape(
+        return decoded.reshape(
             batch_size,
             sequence_length,
             self.output_channels,

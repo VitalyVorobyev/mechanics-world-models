@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from models.mechanics.integrator import semi_implicit_euler_step
-from models.mechanics.lagrangian import LagrangianDynamics
+from models.mechanics.lagrangian import LagrangianDynamics, MLPDynamics
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class MechanicsTransition(nn.Module):
 
     def __init__(
         self,
-        dynamics: LagrangianDynamics,
+        dynamics: LagrangianDynamics | MLPDynamics,
         nuisance_dim: int,
         dt: float,
         n_substeps: int = 1,
@@ -60,8 +60,8 @@ class MechanicsTransition(nn.Module):
         if n_substeps < 1:
             raise ValueError("n_substeps must be >= 1")
         self.dynamics = dynamics
-        self.q_dim = dynamics.mass_matrix.q_dim
-        self.action_dim = dynamics.actuation.action_dim
+        self.q_dim = dynamics.q_dim
+        self.action_dim = dynamics.action_dim
         self.nuisance_dim = nuisance_dim
         self.dt = dt
         self.n_substeps = n_substeps

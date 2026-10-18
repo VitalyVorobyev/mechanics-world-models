@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import torch
 
-from models.mechanics.lagrangian import LagrangianDynamics, forward_acceleration
+from models.mechanics.lagrangian import LagrangianDynamics, MLPDynamics, forward_acceleration
 
 
 def semi_implicit_euler_step(
-    dynamics: LagrangianDynamics,
+    dynamics: LagrangianDynamics | MLPDynamics,
     q: torch.Tensor,
     qdot: torch.Tensor,
     u: torch.Tensor,

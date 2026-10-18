@@ -16,7 +16,10 @@ class Trajectory:
 
     Optional ``qpos`` / ``qvel`` / ``physics_params`` carry simulator ground
     truth for evaluation diagnostics (linear probes, energy tracking, OOD
-    grouping). They are *never* consumed by the training loss — the project
+    grouping). Optional ``frame_dt`` is the simulated time in seconds between
+    consecutive images (control timestep x action repeat) and
+    ``software_versions`` records the simulator/renderer package versions the
+    episode was collected with, since a MuJoCo upgrade can change pixels. They are *never* consumed by the training loss — the project
     contract is pixel-only learning, see ``CLAUDE.md`` and the project plan.
 
     The fields are optional so existing datasets that pre-date physics
@@ -37,6 +40,8 @@ class Trajectory:
     qpos: NDArray[np.float64] | None = None
     qvel: NDArray[np.float64] | None = None
     physics_params: dict[str, float] | None = field(default=None)
+    frame_dt: float | None = None
+    software_versions: dict[str, str] | None = field(default=None)
 
     @property
     def num_steps(self) -> int:
@@ -107,12 +112,20 @@ class Trajectory:
                         "physics_params values must be JSON-serializable scalars",
                     )
 
+        if self.frame_dt is not None and not self.frame_dt > 0.0:
+            raise ValueError("frame_dt must be > 0 when set")
+        if self.software_versions is not None:
+            for key, value in self.software_versions.items():
+                if not isinstance(key, str) or not isinstance(value, str):
+                    raise ValueError("software_versions must map str -> str")
+
 
 def save_trajectory_npz(trajectory: Trajectory, path: Path) -> Path:
     """Save a trajectory to a compressed NumPy archive.
 
-    Optional ``qpos``, ``qvel``, ``physics_params`` are written only when
-    present so older readers and older datasets stay compatible.
+    Optional ``qpos``, ``qvel``, ``physics_params``, ``frame_dt`` and
+    ``software_versions`` are written only when present so older readers and
+    older datasets stay compatible.
     """
 
     trajectory.validate()
@@ -137,6 +150,12 @@ def save_trajectory_npz(trajectory: Trajectory, path: Path) -> Path:
         payload["physics_params_json"] = np.asarray(
             json.dumps(trajectory.physics_params, sort_keys=True),
         )
+    if trajectory.frame_dt is not None:
+        payload["frame_dt"] = np.asarray(trajectory.frame_dt, dtype=np.float64)
+    if trajectory.software_versions is not None:
+        payload["software_versions_json"] = np.asarray(
+            json.dumps(trajectory.software_versions, sort_keys=True),
+        )
     np.savez_compressed(path, **payload)
     return path
 
@@ -145,7 +164,8 @@ def load_trajectory_npz(path: Path) -> Trajectory:
     """Load a trajectory from a NumPy archive.
 
     Tolerant of both the legacy schema (no physics fields) and the current
-    schema (with optional ``qpos``/``qvel``/``physics_params_json``).
+    schema (with optional ``qpos``/``qvel``/``physics_params_json``/
+    ``frame_dt``/``software_versions_json``).
     """
 
     with np.load(path, allow_pickle=False) as data:
@@ -160,6 +180,11 @@ def load_trajectory_npz(path: Path) -> Trajectory:
         if "physics_params_json" in keys:
             raw = str(data["physics_params_json"].item())
             physics_params = {str(k): float(v) for k, v in json.loads(raw).items()}
+        frame_dt = float(data["frame_dt"].item()) if "frame_dt" in keys else None
+        software_versions: dict[str, str] | None = None
+        if "software_versions_json" in keys:
+            raw = str(data["software_versions_json"].item())
+            software_versions = {str(k): str(v) for k, v in json.loads(raw).items()}
         trajectory = Trajectory(
             env_name=str(data["env_name"].item()),
             seed=int(data["seed"].item()),
@@ -175,6 +200,8 @@ def load_trajectory_npz(path: Path) -> Trajectory:
             qpos=qpos,
             qvel=qvel,
             physics_params=physics_params,
+            frame_dt=frame_dt,
+            software_versions=software_versions,
         )
     trajectory.validate()
     return trajectory

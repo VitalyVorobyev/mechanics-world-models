@@ -157,15 +157,22 @@ def test_eval_mechanics_writes_metrics_and_visualizations(tmp_path: Path) -> Non
         "foreground_reconstruction_mse",
         "open_loop_future_mse",
         "foreground_open_loop_future_mse",
-        "qdot_smoothness_mse",
         "open_loop_mse_h1",
         "foreground_open_loop_mse_h10",
+        "copy_last_frame_mse_h1",
+        "foreground_copy_last_frame_mse_h10",
     ):
         assert key in written, f"missing metric {key!r}"
+    assert "qdot_smoothness_mse" not in written
     assert written["physics_in_dataset"] is True
     assert "linear_probe" in written
     probe = written["linear_probe"]
     assert "q_to_qpos_r2_overall" in probe and "qdot_to_qvel_r2_overall" in probe
+    state_probes = written["state_probes"]
+    assert state_probes["pose_target_names"] == ["qpos0", "cos_qpos1", "sin_qpos1"]
+    assert set(state_probes["probes"]) == {"q", "qdot", "z", "q_qdot", "q_z", "full"}
+    for kind in ("linear", "mlp"):
+        assert "r2_overall" in state_probes["probes"]["z"]["pose"][kind]
     assert "energy" in written
     assert written["energy"]["horizons_evaluated"] >= 1
 

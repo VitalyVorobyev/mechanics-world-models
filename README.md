@@ -39,26 +39,23 @@ and visual distribution shift:
 - offline trainers (`train-rssm`, `train-mechanics`) with JSONL loss history,
   checkpoints, AdamW + cosine LR, auto-resume, NaN/Inf skip guard, and live
   open-loop FG-MSE validation probes
-- evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE,
-  videos, and contact sheets; `eval-mechanics` additionally reports a
-  linear-probe R² onto the simulator's ground-truth state (when available)
-  and a learned-energy drift diagnostic
-- a CEM / MPC planner (`eval-control`) for scoring world-model checkpoints
-  on the real environment, including physics-perturbation and
-  visual-distractor wrappers for the OOD grid
-- a pytest suite (127 tests at time of writing) covering environment,
+- evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE
+  against a copy-last-frame baseline, videos, and contact sheets, plus
+  linear and MLP state probes onto the simulator's ground-truth state (when
+  available); `eval-mechanics` also reports a learned-energy drift
+- a CEM / MPC planner (`eval-control`, RSSM checkpoints only for now),
+  including physics-perturbation and visual-distractor wrappers
+- a pytest suite (139 tests at time of writing) covering environment,
   dataset, model shapes, losses, finite-diff kinematics, training-history,
-  MPS regression guards, linear probe, and end-to-end evaluation smoke
-  tests
+  MPS regression guards, probes, and end-to-end evaluation smoke tests
 
-Phase 0 (RSSM stable) is closed. The mechanics model has been through
-three rounds of debugging — a z-channel KL phase transition and a weak-
-coupling `q`/`q̇` factorization — and the current Phase-3 architecture
-replaces the soft smoothness prior with a hard kinematic constraint. See
-`docs/current_status.md` for the blow-by-blow and the pending training /
-evaluation run on the recollected-with-physics dataset. The ablations
-(no-dissipation, unfactored, reconstruction-free contrastive) and the
-OOD evaluation grid are still ahead.
+Phase 0 (RSSM stable) is closed. The October 2026 review of the mechanics
+model found that, on the April checkpoints, the pose is carried by the
+nuisance channel rather than by `q`, and the RSSM baseline predicts better
+on identical sequences. The project is now gated on one experiment that
+forces the pose through `q` and compares Lagrangian against MLP dynamics;
+see `docs/current_status.md` for the findings, the gate, and the stop
+criterion.
 
 ## Why This Exists
 
@@ -277,20 +274,20 @@ Done:
   differencing `q̇ = d/dt(q)` inside the encoder
 - reward prediction head, CEM / MPC planner, physics-perturbation and
   visual-distractor wrappers, `eval-control` entry point
-- linear-probe R² and learned-energy diagnostics for the factorization
-- automatic physics-state serialization in the collector so K2 / H3
-  diagnostics can run without a separate flag
+- state probes (episode-split, linear + MLP) and learned-energy diagnostics
+- automatic physics-state, frame-timing and simulator-version
+  serialization in the collector
+- Phase-3 training and evaluation, joint multi-regime training, RSSM with
+  reward head (results and their re-interpretation in
+  `docs/current_status.md`)
 
 Ahead:
 
-- run the Phase-3 mechanics training (`bash scripts/train_mechanics.sh`)
-  and evaluate on the recollected `cartpole-swingup-random-100k-v2`
-  dataset; measure K1 (FG-MSE), K2 (linear probe R² for both q and q̇),
-  H3 (learned-energy drift)
-- B2 (no dissipation), B3 (unfactored LNN+D), B4 (reconstruction-free
-  contrastive) ablations
-- OOD evaluation grid across mass / length / damping and visual shifts on
-  cartpole, then acrobot
+- gate experiment: `scripts/train_gate.sh lagrangian|mlp`, then
+  `scripts/eval_gate.sh` (continue/stop criteria in
+  `docs/current_status.md`)
+- only if the gate passes: model-agnostic CEM, swing-up-covering data, MPC
+  under physically consistent OOD shifts, ablations
 - keep the implementation inspectable enough to debug failure cases
   directly
 

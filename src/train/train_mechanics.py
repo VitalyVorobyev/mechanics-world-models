@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from data import EpisodeSequenceDataset, ImageCropConfig
+from data.frame_timing import resolve_dataset_frame_dt
 from data.image_transforms import add_crop_args, crop_config_from_args
 from models.losses import foreground_reconstruction_mask
 from models.mechanics import (
@@ -68,8 +69,17 @@ class MechanicsTrainConfig:
     actuation_hidden_size: int = 64
     dynamics_hidden_layers: int = 2
     with_dissipation: bool = True
-    dt: float = 0.01
+    # Seconds between frames. ``None`` resolves from the dataset (control
+    # timestep x action repeat) at train start; the resolved value is what the
+    # checkpoint stores.
+    dt: float | None = None
     n_substeps: int = 1
+    qdot_stencil: str = "central"
+    angle_dims: tuple[int, ...] = ()
+    nuisance_mode: str = "concat"
+    dynamics_form: str = "lagrangian"
+    dissipation_form: str = "rayleigh_mlp"
+    mlp_dynamics_hidden_size: int = 128
     nuisance_alpha_init: float = 0.95
     mech_min_std: float = 0.05
     nuisance_min_std: float = 0.1
@@ -119,8 +129,22 @@ RESUME_GUARDED_CONFIG_KEYS: tuple[str, ...] = (
     "with_dissipation",
     "dt",
     "n_substeps",
+    "qdot_stencil",
+    "angle_dims",
+    "nuisance_mode",
+    "dynamics_form",
+    "dissipation_form",
     "crop_config",
 )
+# Values implied for guarded keys that checkpoints from before the key existed
+# do not store, so those runs can still be resumed.
+LEGACY_CONFIG_DEFAULTS: dict[str, Any] = {
+    "qdot_stencil": "central",
+    "angle_dims": [],
+    "nuisance_mode": "concat",
+    "dynamics_form": "lagrangian",
+    "dissipation_form": "rayleigh_mlp",
+}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -151,8 +175,48 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_false",
         default=True,
     )
-    parser.add_argument("--dt", type=float, default=0.01)
+    parser.add_argument(
+        "--dt",
+        type=float,
+        default=None,
+        help=(
+            "seconds between frames; default resolves from the dataset "
+            "(control timestep x action repeat, 0.02 for the cartpole datasets)"
+        ),
+    )
     parser.add_argument("--n-substeps", type=int, default=1)
+    parser.add_argument(
+        "--qdot-stencil",
+        choices=("central", "backward"),
+        default="central",
+        help="finite-difference stencil for the derived q̇ (backward is causal)",
+    )
+    parser.add_argument(
+        "--angle-dims",
+        type=int,
+        nargs="*",
+        default=[],
+        help="q indices that are angles (cartpole pole angle: 1); embedded as (cos, sin)",
+    )
+    parser.add_argument(
+        "--nuisance-mode",
+        choices=("concat", "style"),
+        default="concat",
+        help="concat: decoder reads (q, q̇, z); style: z only modulates per-channel colour",
+    )
+    parser.add_argument(
+        "--dynamics-form",
+        choices=("lagrangian", "mlp"),
+        default="lagrangian",
+        help="mlp: unstructured q̈ = MLP(q, q̇, u) baseline with the same encoder/integrator",
+    )
+    parser.add_argument(
+        "--dissipation-form",
+        choices=("rayleigh_mlp", "linear"),
+        default="rayleigh_mlp",
+        help="linear: constant PSD damping C q̇, provably passive",
+    )
+    parser.add_argument("--mlp-dynamics-hidden-size", type=int, default=128)
     parser.add_argument("--nuisance-alpha-init", type=float, default=0.95)
     parser.add_argument("--mech-min-std", type=float, default=0.05)
     parser.add_argument("--nuisance-min-std", type=float, default=0.1)
@@ -224,6 +288,12 @@ def config_from_args(args: argparse.Namespace) -> MechanicsTrainConfig:
         with_dissipation=args.with_dissipation,
         dt=args.dt,
         n_substeps=args.n_substeps,
+        qdot_stencil=args.qdot_stencil,
+        angle_dims=tuple(args.angle_dims),
+        nuisance_mode=args.nuisance_mode,
+        dynamics_form=args.dynamics_form,
+        dissipation_form=args.dissipation_form,
+        mlp_dynamics_hidden_size=args.mlp_dynamics_hidden_size,
         nuisance_alpha_init=args.nuisance_alpha_init,
         mech_min_std=args.mech_min_std,
         nuisance_min_std=args.nuisance_min_std,
@@ -270,6 +340,10 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
 
     console = console or Console()
     validate_config(config)
+    if config.dt is None:
+        frame_dt, source = resolve_dataset_frame_dt(config.dataset_dir)
+        config = replace(config, dt=frame_dt)
+        console.print(f"resolved dt={frame_dt:g}s from {source}")
 
     set_seed(config.seed)
     device = resolve_device(config.device)
@@ -340,6 +414,12 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
         nuisance_alpha_init=config.nuisance_alpha_init,
         reward_head=config.reward_head,
         reward_head_hidden_size=config.reward_head_hidden_size,
+        qdot_stencil=config.qdot_stencil,
+        angle_dims=config.angle_dims,
+        nuisance_mode=config.nuisance_mode,
+        dynamics_form=config.dynamics_form,
+        dissipation_form=config.dissipation_form,
+        mlp_dynamics_hidden_size=config.mlp_dynamics_hidden_size,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -392,10 +472,12 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
                 "sequence_length must be >= val_open_loop_warmup + max(horizon) - 1; "
                 f"got sequence_length={config.sequence_length}, required={required}",
             )
+        assert val_dataset is not None
         val_probe_batch = collect_val_probe_batch(
-            loader=val_loader,
+            dataset=val_dataset,
             num_sequences=config.val_open_loop_sequences,
             device=device,
+            seed=config.seed,
         )
         if val_probe_batch is None:
             raise ValueError("validation loader is empty; cannot run open-loop probe")
@@ -787,7 +869,7 @@ def validate_resume_config(
     expected_dict = serializable_config(expected)
     mismatches: list[str] = []
     for key in RESUME_GUARDED_CONFIG_KEYS:
-        saved_value = saved.get(key)
+        saved_value = saved.get(key, LEGACY_CONFIG_DEFAULTS.get(key))
         expected_value = expected_dict.get(key)
         if saved_value != expected_value:
             mismatches.append(f"{key}: checkpoint={saved_value!r} current={expected_value!r}")
@@ -811,8 +893,18 @@ def validate_config(config: MechanicsTrainConfig) -> None:
         raise ValueError("q_dim must be >= 1")
     if config.nuisance_dim < 1:
         raise ValueError("nuisance_dim must be >= 1")
-    if config.dt <= 0.0:
+    if config.dt is not None and config.dt <= 0.0:
         raise ValueError("dt must be > 0")
+    if config.qdot_stencil not in ("central", "backward"):
+        raise ValueError("qdot_stencil must be 'central' or 'backward'")
+    if config.nuisance_mode not in ("concat", "style"):
+        raise ValueError("nuisance_mode must be 'concat' or 'style'")
+    if config.dynamics_form not in ("lagrangian", "mlp"):
+        raise ValueError("dynamics_form must be 'lagrangian' or 'mlp'")
+    if config.dissipation_form not in ("rayleigh_mlp", "linear"):
+        raise ValueError("dissipation_form must be 'rayleigh_mlp' or 'linear'")
+    if any(not 0 <= dim < config.q_dim for dim in config.angle_dims):
+        raise ValueError("angle_dims entries must lie in [0, q_dim)")
     if config.n_substeps < 1:
         raise ValueError("n_substeps must be >= 1")
     if config.foreground_reconstruction_weight < 0.0:
@@ -911,7 +1003,12 @@ def print_run_summary(
     table.add_row("q_dim", str(config.q_dim))
     table.add_row("nuisance_dim", str(config.nuisance_dim))
     table.add_row("with_dissipation", str(config.with_dissipation))
-    table.add_row("dt", f"{config.dt:.4f}")
+    table.add_row("dt", f"{config.dt:.4f}" if config.dt is not None else "unresolved")
+    table.add_row("qdot_stencil", config.qdot_stencil)
+    table.add_row("angle_dims", str(list(config.angle_dims)))
+    table.add_row("nuisance_mode", config.nuisance_mode)
+    table.add_row("dynamics_form", config.dynamics_form)
+    table.add_row("dissipation_form", config.dissipation_form)
     table.add_row("imagination_horizon", str(config.imagination_horizon))
     console.print(table)
 

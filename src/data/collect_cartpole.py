@@ -81,7 +81,7 @@ def collect_random_rollouts(
     every saved trajectory's ``physics_params`` field.
     """
 
-    from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
+    from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig, simulator_versions
 
     if total_frames < 1:
         raise ValueError("total_frames must be >= 1")
@@ -103,6 +103,8 @@ def collect_random_rollouts(
 
     with DmControlPixelEnv(config) as env:
         physics_params = env.physics_params()
+        frame_dt = env.frame_dt()
+        software_versions = simulator_versions()
         while remaining > 0:
             initial_image = env.reset()
             initial_state = env.reset_physics_state()
@@ -156,6 +158,8 @@ def collect_random_rollouts(
                 qpos=qpos_array,
                 qvel=qvel_array,
                 physics_params=dict(physics_params),
+                frame_dt=frame_dt,
+                software_versions=dict(software_versions),
             )
             path = output_dir / f"episode_{episode_id:06d}.npz"
             written_paths.append(save_trajectory_npz(trajectory, path))
