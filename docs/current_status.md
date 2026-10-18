@@ -33,9 +33,16 @@ Details, predictions written before each run, and tables are in
     (keypoint), 0.75 (conv), 0.54 (heuristic). With real errors the
     Lagrangian's nominal fit degrades far more than the MLP's, the
     reverse of the Gaussian case.
-  - Removing the smooth per-pose bias does not help. Outlier rejection
-    and a synthetic heavy-tail test are running to check the leading
-    explanation (q̇² Coriolis terms amplify velocity spikes).
+  - Removing the smooth per-pose bias does not help. **Rejecting frames
+    whose pose jumps does:** with the conv encoder the Lagrangian becomes
+    stable, level with the MLP at nominal, and its advantage returns to
+    about 1.5× (`shoot`, k1 1.50, k5 1.58). With the label-free
+    heuristic it stabilizes too (nominal 0.03 vs the MLP's 0.055), but
+    the ratio is borderline (1.2–1.3).
+  - A synthetic test confirms the mechanism. 2% heavy outliers on
+    0.08 px noise multiply the Lagrangian's nominal error 5× and the
+    MLP's 2.5×, and the ratio falls from 2.2 to 0.9. The likely cause is
+    the unbounded q̇² Coriolis terms amplifying velocity spikes.
 - **The camera does not see the system in 35% of frames** (A-VIEW-1).
   The cart is out of view in 26%, since the frame spans ±1.66 m and the
   rail ±1.8 m. Every pixel model trained on this data was asked to
@@ -54,10 +61,18 @@ Details, predictions written before each run, and tables are in
   - `--param` for gear and gravity;
   - fixed a result-file collision between parallel seeds and a
     zero-sigma weighting bug in the shooting estimator.
-- **Next:** decide from the outlier tests whether robust training is
-  enough for real front ends. If it is not, build an explicit
-  observation-noise model (a filtering posterior) before any end-to-end
-  pixel training.
+- **Front-end requirements for the pixel version:**
+  - typical pose error near 0.1–0.2 px;
+  - rejection of rare large errors, or a robust loss;
+  - a model-based start state over at least 8 frames;
+  - in-view frames only;
+  - a slot for every parameter that is meant to shift.
+- **Next:**
+  - make the Lagrangian itself robust (bounded velocity features in the
+    Coriolis term, or a Huber loss) instead of rejecting frames;
+  - then an explicit observation-noise model (a filtering posterior),
+    and only then end-to-end pixel training with a render-and-compare
+    front end.
 
 ## Earlier (2026-10-18, night): H1b supported on true state, for parameter extrapolation
 

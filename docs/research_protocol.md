@@ -51,11 +51,16 @@ criteria.
 |---|---|---|---|
 | 0. Intervention | Does the manipulation change what we think, by enough to measure? | `intervention_effect.py` | 1 min |
 | 1. Decoder oracle | Can the decoder render frames from the *true* state? | `decoder_oracle.py` | 10–30 min |
-| 2. Encoder oracle | Can the encoder regress the *true* state from pixels? | `encoder_oracle.py` | 10–30 min |
+| 2. Encoder oracle | Can the encoder regress the *true* state from pixels? Report degrees and pixels, split by visibility and pose. | `encoder_oracle.py` | 10–30 min |
+| 2b. Frozen renderer | Can an encoder learn the pose *without labels* through a fixed, correct renderer? | `frozen_renderer_oracle.py` | 10 min MPS |
+| 2c. Label-free bootstrap | Classical-CV poses, then render-and-compare EM: how close to supervised? | `bootstrap_oracle.py` | 30 min MPS |
 | 3. Dynamics oracle | On *true* state trajectories, how do the dynamics classes compare (fit, rollout, adaptation)? | `dynamics_oracle.py` | minutes on CPU |
 | 3c. Dynamics ceiling | How well does the *true* dynamics do under our integrator and window selection? | `dynamics_ceiling.py` | seconds |
 | 3g. Mass gauge | Are the learned Lagrangian terms the true ones up to scale? | `mass_gauge.py` | seconds |
 | 3m. Matched baseline | Does structure beat a context-conditioned MLP trained on the same conditions? | `context_oracle.py` | ≈ 40 min CPU |
+| 3n. Observation noise | Does the advantage survive pose noise, finite-difference velocities and heavy tails? | `context_oracle.py --pose-noise [--pose-outliers]` | ≈ 40 min CPU |
+| 3s. Start state | How much of the error is the start-state estimate? (backward, quadfit, model-based shooting, each with its true-dynamics floor) | `context_oracle.py --start-context N` | minutes, reuses cells |
+| 3p. Real front end | Same, with poses read from rendered frames by an encoder or the heuristic (two-stage pixel pipeline) | `context_oracle.py --encoder / --front-end [--reject-jumps]` | ≈ 50 min CPU |
 | 4. Overfit one batch | Does the full model drive its loss down on 16 sequences? | `overfit_batch.py` | 5–10 min |
 | 5. Pilot | Short real run with live probes: does the signal of interest move? | trainer with `--epochs 1` | ≈ 1 h |
 | 6. Full run | Confirm, with seeds | `gate_pipeline.sh`-style resumable runner | hours |

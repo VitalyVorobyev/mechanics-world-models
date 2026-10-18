@@ -20,7 +20,7 @@ Last full review: 2026-10-18.
 | ID | Statement (short) | Status |
 |---|---|---|
 | H1a | Mechanics structure improves extrapolation to unseen *states* of the same system | open |
-| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation* when the parameter has a matching slot: cart mass (up to 7×), actuator gear (4×), gravity with a potential slot (5×) vs a context MLP; parity inside the trained range; a missing slot makes it 2–3× *worse*. Survives 0.25 px Gaussian pose noise with a model-based start state; not yet with real encoder poses (ratio 1.2) |
+| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation* when the parameter has a matching slot: cart mass (up to 7×), actuator gear (4×), gravity with a potential slot (5×) vs a context MLP; parity inside the trained range; a missing slot makes it 2–3× *worse*. Through pixels (two-stage): about 1.5× with a conv encoder plus outlier rejection plus a model-based start state; 1.2–1.3 with label-free heuristic poses; lost without rejection (heavy tails hurt the Lagrangian about 2× more than the MLP) |
 | H1-zs | Structure alone (no adaptation) degrades more gracefully under parameter shift | refuted as a useful question |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
@@ -854,6 +854,27 @@ Last full review: 2026-10-18.
   on the scale (`--jump-min-scale 0.004 0.012`, about one frame of
   physical acceleration), which keeps 71% of frames against 77% before
   rejection.
+- **Heuristic + floored rejection: result (2026-10-19, seeds 0–2):**
+  - The Lagrangian's nominal h20 falls from 0.079–0.166 to 0.029–0.031.
+    That is now *better* than the MLP (0.055), so rejection removes the
+    instability with a label-free front end as well.
+  - Ratios (mean over shifts with valid windows):
+
+    | | seed 0 | seed 1 | seed 2 | mean |
+    |---|---|---|---|---|
+    | `shoot` k1 | 1.10 | 0.99 | 1.38 | 1.16 |
+    | `shoot` k5 | 1.25 | 1.21 | 1.42 | 1.29 |
+    | true start k1 | 1.20 | 1.00 | 1.67 | 1.29 |
+    | true start k5 | 1.32 | 1.26 | 1.59 | 1.39 |
+
+  - Seed 1 has no fully valid 8-frame context window for ×0.3 after
+    rejection (NaN, skipped). `evaluate_starts` now returns NaN for empty
+    window sets instead of crashing.
+  - Reading: borderline. The label-free pipeline keeps part of the
+    advantage, between the keypoint encoder and the conv encoder with
+    rejection. The remaining gap fits the heuristic's larger smooth error
+    (θ median 1.24°, rms 1.9°, about 0.55–0.8 px at the tip), the regime
+    where Gaussian noise also leaves about 1.5× at best.
 
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**

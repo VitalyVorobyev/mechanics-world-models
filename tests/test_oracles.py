@@ -444,3 +444,13 @@ def test_reject_jumps_scale_floor_handles_quantized_poses() -> None:
     episodes.observed_qpos[0, :, 0] = 0.01 * (np.arange(201) // 7)  # cart moving in pixel-sized steps
     assert reject_jumps(episodes, 6.0).valid.mean() < 0.5  # MAD collapses to zero: every step is a "jump"
     assert reject_jumps(episodes, 6.0, (0.004, 0.012)).valid.mean() > 0.95
+
+
+def test_evaluate_starts_handles_no_windows() -> None:
+    from oracles.start_state import ContextWindows, evaluate_starts
+
+    empty = ContextWindows(
+        observed=np.zeros((0, 9, 2)), actions=np.zeros((0, 28, 1)), start_q=np.zeros((0, 2)),
+        start_qdot=np.zeros((0, 2)), target=np.zeros((0, 20, 2)), context=8, frame_dt=0.02,
+    )
+    assert np.isnan(evaluate_starts(_particle_rollout, empty, (20,), sigma=(0.01, 0.01))["shoot.dev_h20"])

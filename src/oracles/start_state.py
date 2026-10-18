@@ -155,6 +155,8 @@ def evaluate_starts(
 
     h_max = max(horizons)
     c = w.context
+    if len(w.target) == 0:  # no window has a fully valid context (e.g. heavy rejection)
+        return {f"{name}.dev_h{h}": float("nan") for name in ("true_start", *estimators) for h in horizons}
     preds: dict[str, np.ndarray] = {"true_start": rollout(w.start_q, w.start_qdot, w.actions[:, c : c + h_max])}
     for name in estimators:
         if name == "shoot":
