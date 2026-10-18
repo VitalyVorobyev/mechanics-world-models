@@ -53,6 +53,9 @@ criteria.
 | 1. Decoder oracle | Can the decoder render frames from the *true* state? | `decoder_oracle.py` | 10–30 min |
 | 2. Encoder oracle | Can the encoder regress the *true* state from pixels? | `encoder_oracle.py` | 10–30 min |
 | 3. Dynamics oracle | On *true* state trajectories, how do the dynamics classes compare (fit, rollout, adaptation)? | `dynamics_oracle.py` | minutes on CPU |
+| 3c. Dynamics ceiling | How well does the *true* dynamics do under our integrator and window selection? | `dynamics_ceiling.py` | seconds |
+| 3g. Mass gauge | Are the learned Lagrangian terms the true ones up to scale? | `mass_gauge.py` | seconds |
+| 3m. Matched baseline | Does structure beat a context-conditioned MLP trained on the same conditions? | `context_oracle.py` | ≈ 40 min CPU |
 | 4. Overfit one batch | Does the full model drive its loss down on 16 sequences? | `overfit_batch.py` | 5–10 min |
 | 5. Pilot | Short real run with live probes: does the signal of interest move? | trainer with `--epochs 1` | ≈ 1 h |
 | 6. Full run | Confirm, with seeds | `gate_pipeline.sh`-style resumable runner | hours |

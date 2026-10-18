@@ -131,6 +131,17 @@ class DmControlPixelEnv:
         self._time_step = self._env.reset()
         return self.render()
 
+    def reset_without_render(self) -> dict[str, NDArray[np.float64]]:
+        """Reset and return the initial physics state, no image (simulator-only diagnostics)."""
+
+        self._time_step = self._env.reset()
+        return self.physics_state()
+
+    def episode_done(self) -> bool:
+        """Whether the last step ended the episode."""
+
+        return bool(self._time_step is not None and self._time_step.last())
+
     def step(self, action: NDArray[np.floating[Any]]) -> PixelStep:
         """Apply one action for ``action_repeat`` physics steps."""
 

@@ -184,3 +184,19 @@ def pose_features(qpos: np.ndarray) -> np.ndarray:
     """``[..., 2]`` (x, theta) -> ``[..., 3]`` (x, cos theta, sin theta)."""
 
     return np.stack([qpos[..., 0], np.cos(qpos[..., 1]), np.sin(qpos[..., 1])], axis=-1)
+
+
+def load_shift_splits(dataset_dir: Path, seed: int = 0) -> tuple[StateEpisodes, StateEpisodes, StateEpisodes]:
+    """Split a shifted dataset by episode: half adaptation, a quarter selection, a quarter test."""
+
+    held_out = load_state_episodes(dataset_dir, split="val", val_fraction=0.5, seed=seed)
+    half = held_out.qpos.shape[0] // 2
+
+    def part(index: slice) -> StateEpisodes:
+        return StateEpisodes(
+            qpos=held_out.qpos[index], qvel=held_out.qvel[index], actions=held_out.actions[index],
+            frame_dt=held_out.frame_dt,
+        )
+
+    train = load_state_episodes(dataset_dir, split="train", val_fraction=0.5, seed=seed)
+    return train, part(slice(0, half)), part(slice(half, None))

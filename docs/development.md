@@ -310,12 +310,38 @@ criteria and the registry IDs it informs.
 .venv/bin/python scripts/oracles/decoder_oracle.py --kind render
 # Rung 2 (~1 min): encoder regressing the TRUE pose (keypoint | conv)
 .venv/bin/python scripts/oracles/encoder_oracle.py --kind keypoint
-# Rung 3 (~5 min CPU): Lagrangian vs MLP on true state + few-shot adaptation
+# Rung 3 ceiling (~3 s): true MuJoCo dynamics under our integrator, with and
+# without rail-contact windows (sets the floor any learned dynamics can reach)
+.venv/bin/python scripts/oracles/dynamics_ceiling.py \
+    --dataset nominal=data/cartpole-swingup-random-100k-v2 \
+    --dataset cart_mass_x2=data/cartpole-ood-cartmass20-15k-v2:body_mass_1=2.0
+# Rung 3 (~40 min CPU per seed): Lagrangian vs MLP on true state + few-shot
+# adaptation, rail-free windows, symmetric adaptation grid
 .venv/bin/collect-cartpole --output-dir data/cartpole-ood-cartmass20-15k-v2 \
     --total-frames 15000 --seed 12 --action-repeat 2 --physics-scale body_mass_1=2.0
-.venv/bin/python scripts/oracles/dynamics_oracle.py \
-    --shift cart_mass_x05=data/cartpole-ood-cartmass05-15k-v2 \
-    --shift cart_mass_x2=data/cartpole-ood-cartmass20-15k-v2 --pretrain-steps 10000
+scripts/oracles/run_dynamics_v2.sh            # seeds 0 1 2 in parallel
+tail -f runs/oracles/logs/dynamics_v2_seed0.log   # progress: [cells done/total]
+pkill -f dynamics_oracle.py                   # stop; re-run the launcher to resume
+```
+
+Use `--actuated-dims 0` for physically meaningful Lagrangian terms
+(A-ACT-1); `TAG=dynamics_v3 scripts/oracles/run_dynamics_v2.sh
+--actuated-dims 0` names the logs accordingly.
+
+The dynamics oracle caches pretrained models under
+`runs/oracles/dynamics_oracle/cache/pretrained/<pretrain-hash>/`, and
+finished adaptation cells under `cache/<config-hash>/`. The same command
+resumes after an interruption, and adaptation-only flag changes reuse the
+pretrained models.
+
+```bash
+# Is the learned M the true M up to scale? (A-ACT-1, seconds)
+.venv/bin/python scripts/oracles/mass_gauge.py \
+    --model cart_only=runs/oracles/dynamics_oracle/cache/pretrained/<hash>/lagrangian.pt:0
+# Matched baseline (H1b): context-conditioned MLP vs Lagrangian slots,
+# trained on simulated cart masses {1, 0.7, 0.85, 1.2, 1.4}, tested on x0.5 / x2
+.venv/bin/python -u scripts/oracles/context_oracle.py --seed 0 \
+    >> runs/oracles/logs/context_seed0.log 2>&1
 ```
 
 The keypoint / renderer front end (`--encoder-type keypoint --decoder-type

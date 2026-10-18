@@ -240,6 +240,12 @@ class Actuation(nn.Module):
     """Learned input map ``B(q)`` of shape ``[d, a]``.
 
     Generalized force injected into the Euler-Lagrange equation is ``B(q) u``.
+
+    ``actuated_dims`` (default: all) zeroes the rows of unactuated
+    coordinates. Without it, ``M`` is not identified: only ``M^{-1} B`` is,
+    and a learned ``B`` can drive an unactuated coordinate directly to mimic
+    its inertial coupling (seen on cartpole: the pole row of ``B`` absorbed
+    the cart-pole coupling and the learned ``M[1, 1]`` grew about 70×).
     """
 
     def __init__(
@@ -250,6 +256,7 @@ class Actuation(nn.Module):
         hidden_layers: int = 2,
         input_scale: float = 5.0,
         angle_dims: Sequence[int] = (),
+        actuated_dims: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
         if input_scale <= 0.0:
@@ -259,6 +266,15 @@ class Actuation(nn.Module):
         self.input_scale = input_scale
         self.angle_dims = validate_angle_dims(angle_dims, q_dim)
         self.feature_size = coordinate_feature_size(q_dim, self.angle_dims)
+        row_mask = torch.ones(q_dim)
+        if actuated_dims is not None:
+            dims = validate_angle_dims(actuated_dims, q_dim)
+            if not dims:
+                raise ValueError("actuated_dims must name at least one coordinate")
+            row_mask = torch.zeros(q_dim)
+            row_mask[list(dims)] = 1.0
+        self.actuated_dims = None if actuated_dims is None else tuple(sorted(actuated_dims))
+        self.register_buffer("row_mask", row_mask.view(q_dim, 1), persistent=False)
         self.net = _mlp(
             input_size=self.feature_size,
             output_size=q_dim * action_dim,
@@ -275,7 +291,7 @@ class Actuation(nn.Module):
         q_features = embed_coordinates(q, self.angle_dims, linear_scale=self.input_scale)
         flat = q_features.reshape(-1, self.feature_size)
         raw = self.net(flat)
-        return raw.reshape(*batch_shape, self.q_dim, self.action_dim)
+        return raw.reshape(*batch_shape, self.q_dim, self.action_dim) * self.row_mask
 
 
 class LinearDissipation(nn.Module):

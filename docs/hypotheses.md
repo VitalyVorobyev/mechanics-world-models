@@ -20,7 +20,7 @@ Last full review: 2026-10-18.
 | ID | Statement (short) | Status |
 |---|---|---|
 | H1a | Mechanics structure improves extrapolation to unseen *states* of the same system | open |
-| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | open: v1 oracle inconclusive (current focus) |
+| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | open: on true state about 1.7× at k = 1–2, parity by k = 5 (v3); matched baseline running (current focus) |
 | H1-zs | Structure alone (no adaptation) degrades more gracefully under parameter shift | refuted as a useful question |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
@@ -39,6 +39,7 @@ Last full review: 2026-10-18.
 | A-LEAK-1 | The open-loop start state uses only context frames | refuted for April runs, fixed |
 | A-DISS-1 | The Rayleigh-MLP damping is passive | refuted (not guaranteed); `linear` form added |
 | A-LAG-1 | Unconstrained Lagrangian beats a second-order MLP in distribution | refuted by literature (near parity) |
+| A-ACT-1 | Learned `M`, `V`, `B` match the true terms up to a common scale | refuted for unconstrained `B`; supported with `actuated_dims=(0,)` |
 | A-BASE-1 | The RSSM baseline is a fair stand-in for DreamerV3-class models | assumed |
 | A-MPS-1 | `linalg.solve` / `jvp` workarounds are still needed on MPS | assumed (torch 2.11) |
 | A-ENV-1 | Results reproduce with the locked environment | supported (CPU tests) |
@@ -117,14 +118,168 @@ Last full review: 2026-10-18.
     0.021 (MLP), as large as the shift effect. The Lagrangian fits nominal
     *worse* (h50: 0.103 vs 0.068).
   - `lag_low` plateaus above `lag_full`, the risk listed above.
-- **Next test (v2):**
-  - adaptation learning rate and steps tuned equally per mode (best over
-    a grid, evaluated on held-out shifted episodes);
-  - meet the nominal-accuracy prerequisite (`n_substeps`, longer
-    training);
-  - report results with and without windows near the rail limits
-    (contacts are not Lagrangian);
-  - 3 seeds.
+- **Ceiling check (2026-10-18, `runs/oracles/dynamics_ceiling/20261018-162020.json`):**
+  explains the v1 prerequisite failure.
+  - Setup: MuJoCo's own acceleration, slider limit disabled, integrated by
+    our semi-implicit Euler (`scripts/oracles/dynamics_ceiling.py`).
+  - Even the *true* smooth dynamics have nominal h20 error 0.031–0.037 on
+    all windows, but only 0.0017–0.0070 on windows that stay ≥ 0.2 m from
+    the ±1.8 m rail.
+  - About 30% of h20 windows touch the rail in random-policy data. The
+    rail limit is a stiff, non-Lagrangian constraint, so v1 measured who
+    fakes the wall better.
+  - Cart mass also changes how often the rail is hit (median first hit at
+    frame 94 for ×0.5, 139 nominal, 275 for ×2), which confounds v1.
+  - On rail-free windows the shift effect (nominal physics predicting
+    shifted data) is 0.060 (×0.5) and 0.036 (×2) at h20. The ceiling (true
+    shifted physics, 4 substeps) is 0.0024 and 0.0009, a 25–40× margin.
+- **Test v2 (protocol in `src/oracles/dynamics.py`):**
+  - Rail-free windows only, for both training and evaluation; adaptation
+    segments never approach the rail.
+  - 2 integrator substeps.
+  - Pretraining uses a cosine learning rate.
+  - Every mode gets the same adaptation grid: learning rates
+    {3e-4, 1e-3, 3e-3, 1e-2} × checkpoints {0, 50, 100, 200, 400, 800}
+    steps. Step 0 means "no adaptation", which removes the v1 overfitting
+    confound.
+  - Headline: one recipe per mode, chosen by mean selection error over all
+    cells, on held-out shifted episodes disjoint from the test episodes.
+    The per-cell best is reported alongside.
+  - k ∈ {1, 2, 5, 20} segments of 50 frames; seeds 0, 1, 2.
+- **Prediction v2 (written 2026-10-18, before running):**
+  - Prerequisite (`prereq_nominal_over_shift_effect ≤ 0.3`): both forms
+    fit nominal rail-free h20 below about 0.011. I expect this to pass
+    (learned error about 0.005–0.010 against a ceiling of 0.0035 at 2
+    substeps).
+  - k = 0 errors close to the shift effect: about 0.06 (×0.5) and about
+    0.036 (×2).
+  - A cart-mass change is exactly a `+Δm` on `M[0, 0]`, and the scale gauge
+    keeps it a single scalar. So `lag_low` should come within 2× of its
+    nominal error at k = 1, provided the learned `M` is accurate.
+  - I expect `mlp_over_lag_error_ratio_k1_h20 ≥ 1.3` (about 60%
+    confidence) and the k5 ratio ≥ 1.3 (about 40%), because 250 frames
+    may be enough for an MLP fine-tune.
+- **Decision rule v2** (on the 3-seed mean, with the sign consistent across
+  all seeds):
+  - *Prerequisite fails:* fix the fit first (longer horizon or training);
+    no conclusion about H1b.
+  - *k1 and k5 both pass:* H1b is supported on state. Next is the matched
+    unstructured baseline (an MLP conditioned on a learned context vector,
+    trained across masses; same number of adapted parameters as `lag_low`).
+    Pixels come only if structure still wins against that baseline.
+  - *Only k1 passes:* the effect is limited to the extreme few-shot regime.
+    Run the same matched-baseline check before deciding on pixels.
+  - *Neither passes:* H1b is refuted on true state, so the pixel version is
+    pointless. Write up the negative result.
+- **Result v2 (2026-10-18, `runs/oracles/dynamics_oracle/20261018-1703*.json`
+  and `-170402.json`, seeds 0–2):** meets the written decision rule, with
+  caveats.
+  - Prerequisite: 0.295 ± 0.018 on the mean, borderline (seed 2 alone:
+    0.318). Nominal rail-free h20 is 0.008–0.0095 for both forms.
+  - `mlp_over_lag_error_ratio_k1_h20` = 1.46 ± 0.21 and `_k5_h20` =
+    1.60 ± 0.20. Both are above 1 in every seed; seed 0's k1 is 1.24.
+    Per-cell recipe selection gives the same picture (1.44 and 1.56).
+
+    Mean h20 over 3 seeds, one recipe per mode:
+
+    | | k=0 lag / mlp | k=1 lag_low / lag_full / mlp_last / mlp_full | k=5 | k=20 |
+    |---|---|---|---|---|
+    | ×0.5 | 0.068 / 0.066 | 0.020 / 0.044 / 0.032 / 0.041 | 0.018 / 0.013 / 0.030 / 0.028 | 0.017 / 0.011 / 0.017 / 0.018 |
+    | ×2 | 0.030 / 0.030 | 0.0042 / 0.0060 / 0.0053 / 0.0077 | 0.0044 / 0.0036 / 0.0038 / 0.0041 | 0.0043 / 0.0035 / 0.0034 / 0.0036 |
+
+  - The effect is concentrated in ×0.5, where a lighter cart reaches
+    faster states than nominal training covered. On ×2 the forms are at
+    parity for k ≥ 5. At k ≥ 5 the advantage comes from `lag_full`, which
+    points to better *extrapolation* (H1a-like) rather than the
+    low-dimensional slot.
+  - `lag_low` plateaus, now explained by A-ACT-1 (gauge) and the slot
+    scale; see v3.
+- **Prediction v3 (written 2026-10-18, before results; same protocol as v2
+  plus `--actuated-dims 0`, see A-ACT-1):**
+  - The learned `M` becomes proportional to the true `M` (relative residual
+    < 0.2).
+  - Nominal fit is unchanged within noise.
+  - `lag_low` no longer plateaus: with all shifted data it reaches ≤ 1.5×
+    nominal error, and at k = 1 it reaches ≤ 0.015 for ×0.5.
+  - So the k1 and k5 ratios rise relative to v2.
+  - If `M` is still not proportional, there is another gauge freedom
+    (the potential or damping absorbing coupling, or `x`-dependence of
+    `M`), and the next prior to test is translation invariance (`M`, `V`
+    independent of `x`).
+- **v3 interim (seed 0, `actuated_dims=(0,)`):**
+  - Confirmed: the learned `M` is now proportional to the true `M`
+    (relative residual 0.044, scale α ≈ 361).
+  - `lag_low` still plateaued (×0.5, all data: 0.021), for a new reason.
+    At α ≈ 361 the cart-mass offset needed is about −180. Adam moved it
+    only to −11 and took the nearby shortcut of doubling the actuation
+    gain.
+  - Setting the offset to the analytic value, with no training, gives h20
+    0.016 (×0.5) and 0.0048 (×2), against zero-shot 0.067 and 0.032. So
+    the slot represents the shift; only its scale was wrong.
+  - Fix: offsets are expressed as fractions of the nominal mean diagonal
+    of the learned `M` (`slot_scale="diag"`, the oracle default from now
+    on).
+- **Prediction v3 (amended before the 3-seed run; protocol =
+  v2 + `--actuated-dims 0` + `slot_scale="diag"`):**
+  - `lag_low` approaches the analytic-offset errors: about 0.016–0.02
+    (×0.5) and about 0.005 (×2) at k = 1, flat in k.
+  - `mlp_over_lag_error_ratio_k1_h20 ≥ 1.5`.
+  - The nominal prerequisite is unchanged from v2 (borderline, about 0.3).
+- **Result v3 (2026-10-18, `runs/oracles/dynamics_oracle/20261018-1741*.json`
+  and `-1747*.json`, seeds 0–2; gauge check in `runs/oracles/mass_gauge/`):**
+  - The gauge is fixed. With `actuated_dims=(0,)` the learned `M` matches
+    the true one up to scale (relative residual 0.047; slopes M00 1.00,
+    M11 1.3, M01 1.7). Unconstrained models in all 3 v2 seeds have
+    residual 0.91–0.93 and M11 inflated 71–80×.
+  - `lag_low` now behaves as a physical slot: flat in k at 0.017 (×0.5) and
+    0.0035 (×2) from k = 1, close to the analytic-offset values.
+  - `mlp_over_lag_error_ratio_k1_h20` = 1.70 ± 0.23, at least 1.5 in every
+    seed (prediction met).
+  - `_k5_h20` = 1.26 ± 0.25, with seed 0 at 0.93: fails, and the sign is
+    inconsistent. By k = 5 an MLP fine-tune is as good. On ×0.5,
+    `lag_low` (0.019) is still better than the MLP (0.028–0.030), but
+    `lag_full` is no longer better than v2's.
+  - Constraining `B` removed `lag_full`'s v2 extrapolation edge (×0.5 k5:
+    0.018 vs 0.013). Full fine-tuning had been using the extra freedom.
+  - The prerequisite stays borderline (0.308; seed 1: 0.339). It is not a
+    clean pass, though the shift is 3× the nominal error.
+  - The residual of `lag_low` on ×0.5 (0.017 vs nominal 0.009 and ceiling
+    0.0024) is model error on faster states than nominal training covered.
+  - **Reading:** a robust but narrow effect. With 1–2 shifted segments
+    (50–100 frames) the physical slot gives about 1.7× lower error than
+    any MLP fine-tune. With 5 or more, the advantage is within seed noise.
+    By the v2 rule this is "only k1 passes", so it goes to the matched
+    baseline.
+- **Matched baseline: context oracle (`scripts/oracles/context_oracle.py`).**
+  - Setup: both forms train on simulated cart masses {1.0, 0.7, 0.85, 1.2,
+    1.4} (30 episodes each). Each mass has a learned 3-number context,
+    with the nominal one pinned to zero.
+    - Lagrangian (with `actuated_dims=(0,)`): the context *is* the slot
+      triple.
+    - MLP: the context is an extra input.
+  - Adaptation fits only a new context (`lag_ctx`, `mlp_ctx`: 3 numbers
+    each), or everything (`*_full`). The adaptation grid and selection
+    protocol are the same as v2.
+  - The test masses ×0.5 and ×2 lie *outside* the training range.
+  - Criterion: `mlp_ctx_over_lag_ctx_ratio_k{1,5}_h20 ≥ 1.3`.
+- **Prediction (written 2026-10-18, before running):**
+  - Within the training range, the context MLP should be fine. Outside it,
+    an MLP context has no reason to extrapolate linearly in mass.
+  - The Lagrangian slot is exactly linear in mass, so it should
+    extrapolate. I expect `lag_ctx` ≈ v3 `lag_low` errors (about 0.016
+    for ×0.5, about 0.005 for ×2) and `mlp_ctx` ≥ 1.5× worse at every k,
+    because extra data cannot fix a context that has no extrapolating
+    direction (about 60% confidence).
+  - Zero-shot (k = 0) errors match v2 for both forms.
+- **Decision rule:**
+  - *Ratio ≥ 1.3 at k1 and k5 (3-seed mean, sign consistent):* H1b is
+    supported on state against the matched baseline. The next step is the
+    pixel version: keypoint front end, A-FE-1 first.
+  - *Ratio < 1.3:* the structural advantage is matched by multi-condition
+    training. H1b is reduced to "no advantage over cRSSM-style training".
+    Stop H1b and write up.
+  - *Mixed:* add an interpolation control (test masses inside the
+    training range) before deciding.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.
@@ -293,6 +448,32 @@ Mean |Δ(x, cos θ, sin θ)| against nominal, same random actions, 8 seeds
   - Botev et al. 2021: physics priors are not better than a Neural ODE on
     pixels.
 - **Not worth re-testing at h ≤ 20** unless H1a/H1b need it as a control.
+
+### A-ACT-1 — a learned Lagrangian has physically meaningful terms
+- **Status:** refuted for unconstrained actuation; supported with
+  `actuated_dims=(0,)` (2026-10-18, `runs/oracles/mass_gauge/`).
+- **Statement:** after fitting nominal data, the learned `M`, `V`, `B` equal
+  the true ones up to a common scale, so a physical change is a change of
+  the matching term. H1b's `lag_low` relies on this.
+- **Evidence:**
+  - Setup: seed 0 of dynamics oracle v2, unconstrained `B(q)`; comparison
+    script in the session scratchpad, to be promoted if reused.
+  - The learned `M` fits a scaled true `M` with relative residual 0.91.
+    `M[0,0] ≈ 10` (true 1.1 × about 9) and `M[0,1]` has the right shape
+    (correlation 0.998). But `M[1,1] ≈ 22–26`, against 0.3 for the scaled
+    true value.
+  - The pole row of the learned `B` drives the pole directly, imitating
+    the inertial reaction to cart acceleration. Only `M⁻¹B` is identified,
+    so nothing in the loss prevents this.
+  - Consequence: `lag_low` fitted on *all* shifted data plateaus (cart
+    mass ×0.5: h20 0.0175 against nominal 0.008). The result does not
+    depend on the learning rate, so it is representational, not data or
+    optimization.
+- **Fix under test:** `Actuation(actuated_dims=(0,))`, so the input enters
+  only the cart equation (the true cartpole input matrix is `[gear, 0]`).
+  This is a mild prior: the actuated coordinate is known, which is standard
+  for underactuated systems. In pixels it requires the encoder's first
+  coordinate to be the cart (true for the keypoint front end).
 
 ### A-BASE-1 — RSSM baseline
 - **Status:** assumed.

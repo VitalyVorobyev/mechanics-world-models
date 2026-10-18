@@ -13,7 +13,7 @@ import torch
 from models.mechanics import MechanicsWorldModel, compute_mechanics_world_model_loss
 from models.mechanics.keypoints import GeometricRenderer, keypoints_to_cartpole_q
 from oracles.common import Criterion, OracleResult, StateEpisodes, pose_features
-from oracles.dynamics import run_dynamics_oracle
+from oracles.dynamics import _windows, free_segments, run_dynamics_oracle
 
 
 def test_oracle_result_verdict_and_write(tmp_path: Path) -> None:
@@ -101,24 +101,69 @@ def _synthetic_episodes(num: int, frames: int, mass_scale: float, seed: int) -> 
     return StateEpisodes(qpos=qpos, qvel=qvel, actions=actions, frame_dt=dt)
 
 
-def test_dynamics_oracle_runs_end_to_end() -> None:
-    result = run_dynamics_oracle(
-        _synthetic_episodes(4, 60, 1.0, 0),
-        _synthetic_episodes(2, 60, 1.0, 1),
-        {"heavy": (_synthetic_episodes(3, 60, 2.0, 2), _synthetic_episodes(2, 60, 2.0, 3))},
+def test_dynamics_oracle_runs_end_to_end(tmp_path: Path) -> None:
+    kwargs = dict(
         ks=(1,),
         segment_length=20,
         train_horizon=4,
         pretrain_steps=5,
-        adapt_steps=2,
+        adapt_lrs=(1e-3,),
+        adapt_checkpoints=(0, 2),
         batch_size=8,
         eval_horizons=(5, 20),
+        rail_margin=None,
+        cache_dir=tmp_path,
         log=lambda _: None,
+    )
+    shifted = {
+        "heavy": tuple(_synthetic_episodes(n, 60, 2.0, s) for n, s in ((3, 2), (2, 3), (2, 4))),
+    }
+    result = run_dynamics_oracle(
+        _synthetic_episodes(4, 60, 1.0, 0), _synthetic_episodes(2, 60, 1.0, 1), shifted, **kwargs,
     )
     for mode in ("lag_low", "lag_full", "mlp_last", "mlp_full"):
         assert np.isfinite(result.metrics[f"heavy.k1.{mode}.dev_h20"])
+        assert np.isfinite(result.metrics[f"heavy.k1.{mode}.cellbest.dev_h20"])
     assert "mlp_over_lag_error_ratio_k1_h20" in result.metrics
+    assert "prereq_nominal_over_shift_effect" in result.metrics
+    # Re-running with the same config resumes from the cache and reproduces the metrics.
+    again = run_dynamics_oracle(
+        _synthetic_episodes(4, 60, 1.0, 0), _synthetic_episodes(2, 60, 1.0, 1), shifted, **kwargs,
+    )
+    assert again.metrics == pytest.approx(result.metrics)
     assert pose_features(np.zeros((1, 2))).shape == (1, 3)
+
+
+def test_rail_windows_are_excluded() -> None:
+    episodes = _synthetic_episodes(2, 40, 1.0, 0)
+    episodes.qpos[0, 30, 0] = 1.75  # cart reaches the rail in episode 0
+    all_windows = _windows(episodes, 5)
+    free = _windows(episodes, 5, rail_margin=0.2)
+    assert free[0].shape[0] == all_windows[0].shape[0] - 6
+    assert free_segments(episodes, 10, 0.2, seed=0) and (0, 20) not in free_segments(episodes, 10, 0.2, seed=0)
+
+
+def test_true_dynamics_ceiling_is_small_away_from_rail() -> None:
+    pytest.importorskip("dm_control")
+    from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
+    from oracles.ceiling import run_dynamics_ceiling
+
+    env = DmControlPixelEnv(PixelEnvConfig(seed=0))
+    env.reset()
+    rng = np.random.default_rng(0)
+    states, actions = [env.physics_state()], []
+    for _ in range(80):
+        actions.append(rng.uniform(-1, 1, size=(1,)))
+        states.append(env.step_without_render(actions[-1]))
+    env.close()
+    episodes = StateEpisodes(
+        qpos=np.stack([s["qpos"] for s in states])[None],
+        qvel=np.stack([s["qvel"] for s in states])[None],
+        actions=np.stack(actions)[None],
+        frame_dt=env.frame_dt(),
+    )
+    result = run_dynamics_ceiling({"nominal": (episodes, None)}, substeps=(4,), horizons=(10, 20), log=lambda _: None)
+    assert result.metrics["nominal.sub4.free.dev_h20"] < 0.01
 
 
 def test_intervention_effect_detects_cart_mass_not_pole_mass() -> None:
@@ -131,3 +176,48 @@ def test_intervention_effect_detects_cart_mass_not_pole_mass() -> None:
         horizons=(10, 20),
     )
     assert result.metrics["cart_mass_x05.mean_abs_dev_h20"] > 5 * result.metrics["pole_mass_x2.mean_abs_dev_h20"]
+
+
+def test_actuated_dims_zero_unactuated_rows() -> None:
+    from models.mechanics.lagrangian import Actuation
+
+    actuation = Actuation(q_dim=2, action_dim=1, hidden_size=8, angle_dims=(1,), actuated_dims=(0,))
+    with torch.no_grad():
+        b = actuation(torch.randn(5, 2))
+    assert b.shape == (5, 2, 1)
+    assert torch.all(b[:, 1] == 0) and torch.any(b[:, 0] != 0)
+    with pytest.raises(ValueError):
+        Actuation(q_dim=2, action_dim=1, actuated_dims=())
+
+
+def test_context_oracle_runs_end_to_end(tmp_path: Path) -> None:
+    from oracles.context import run_context_oracle
+
+    train_envs = {"nominal": _synthetic_episodes(3, 60, 1.0, 0), "light": _synthetic_episodes(3, 60, 0.7, 5)}
+    shifted = {"heavy": tuple(_synthetic_episodes(n, 60, 2.0, s) for n, s in ((3, 2), (2, 3), (2, 4)))}
+    result = run_context_oracle(
+        train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, ks=(1,), segment_length=20, train_horizon=4,
+        pretrain_steps=3, adapt_lrs=(1e-3,), adapt_checkpoints=(0, 2), batch_size=8, eval_horizons=(5, 20),
+        rail_margin=None, cache_dir=tmp_path, log=lambda _: None,
+    )
+    for mode in ("lag_ctx", "lag_full", "mlp_ctx", "mlp_full"):
+        assert np.isfinite(result.metrics[f"heavy.k1.{mode}.dev_h20"])
+    assert "mlp_ctx_over_lag_ctx_ratio_k1_h20" in result.metrics
+
+
+def test_simulated_state_episodes_have_collector_layout() -> None:
+    pytest.importorskip("dm_control")
+    from oracles.context import simulate_state_episodes
+
+    episodes = simulate_state_episodes({"body_mass_1": 0.7}, episodes=1, seed=0)
+    assert episodes.qpos.shape == (1, 501, 2) and episodes.actions.shape == (1, 500, 1)
+    assert episodes.frame_dt == pytest.approx(0.02)
+
+
+def test_true_mass_matrix_matches_cartpole_parameters() -> None:
+    pytest.importorskip("dm_control")
+    from oracles.gauge import true_mass_matrices
+
+    m = true_mass_matrices(np.array([[0.0, 0.0], [0.5, math.pi / 2]]))
+    assert m[:, 0, 0] == pytest.approx([1.1, 1.1], rel=1e-3)  # cart 1.0 + pole 0.1
+    assert abs(m[1, 0, 1]) < 1e-6 < abs(m[0, 0, 1])  # coupling ~ cos(theta)
