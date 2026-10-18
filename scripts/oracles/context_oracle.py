@@ -17,6 +17,7 @@ Writes runs/oracles/context_oracle/<timestamp>.json. Resumable through
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 from pathlib import Path
 
@@ -64,6 +65,14 @@ def main() -> None:
         "--train-velocity", choices=("central", "savgol"), default="central",
         help="with --pose-noise: velocity stencil for training/adaptation/selection windows",
     )
+    parser.add_argument(
+        "--encoder", type=Path, default=None,
+        help="pose encoder saved by encoder_oracle.py --save: train/adapt on poses read from rendered frames",
+    )
+    parser.add_argument("--encoder-device", default="mps")
+    parser.add_argument(
+        "--all-frames", action="store_true", help="with --encoder: keep frames where the cart or pole tip is out of view",
+    )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
     args = parser.parse_args()
@@ -89,19 +98,33 @@ def main() -> None:
             name, _, scale = item.partition("=")
             shift_scales[name] = {args.param: float(scale)}
             sim = simulate_state_episodes(shift_scales[name], episodes=30, seed=1000 * args.seed + 500 + index)
-            shifted[name] = tuple(
-                StateEpisodes(qpos=sim.qpos[part], qvel=sim.qvel[part], actions=sim.actions[part], frame_dt=sim.frame_dt)
-                for part in (slice(0, 15), slice(15, 22), slice(22, 30))
-            )
+            shifted[name] = tuple(sim.select(part) for part in (slice(0, 15), slice(15, 22), slice(22, 30)))
     else:
         for item in shift_items:
             name, _, directory = item.partition("=")
             shifted[name] = load_shift_splits(Path(directory), seed=args.seed)
+    pose_source = None
+    if args.encoder is not None:
+        from oracles.encoder import load_pose_encoder
+        from oracles.pixel_pose import with_encoder_poses
+
+        digest = hashlib.sha256(args.encoder.read_bytes()).hexdigest()[:10]
+        pose_source = f"encoder:{digest}:{'all' if args.all_frames else 'visible'}"
+        encoder = load_pose_encoder(args.encoder, args.encoder_device)
+        encode = lambda e, scales: with_encoder_poses(  # noqa: E731
+            e, scales, encoder, device=args.encoder_device, visible_only=not args.all_frames,
+        )
+        train_envs = {
+            name: encode(e, None if m == 1.0 else {args.param: m})
+            for (name, e), m in zip(train_envs.items(), args.train_scales)
+        }
+        shifted = {name: tuple(encode(e, shift_scales.get(name)) for e in parts) for name, parts in shifted.items()}
+        print(f"poses from {args.encoder} ({pose_source})", flush=True)
     result = run_context_oracle(
         train_envs, nominal_val, shifted, ks=args.ks, pretrain_steps=args.pretrain_steps, seed=args.seed,
         modes=args.modes, pose_noise=(args.pose_noise[0], math.radians(args.pose_noise[1])),
         shift_scales=shift_scales or None, start_context=args.start_context,
-        train_velocity=args.train_velocity, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
+        train_velocity=args.train_velocity, pose_source=pose_source, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
     path = result.write()
     print(result.summary())

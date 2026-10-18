@@ -20,7 +20,7 @@ Last full review: 2026-10-18.
 | ID | Statement (short) | Status |
 |---|---|---|
 | H1a | Mechanics structure improves extrapolation to unseen *states* of the same system | open |
-| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation* (dose-response up to 6× vs a context MLP; parity inside the trained range); pixels not tested (current focus) |
+| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation*, for cart mass (up to 5.8×) and actuator gear (up to 4×) vs a context MLP; parity inside the trained range; survives 0.25 px pose noise with a model-based start state (see noisy-state entries); pixels not tested |
 | H1-zs | Structure alone (no adaptation) degrades more gracefully under parameter shift | refuted as a useful question |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
@@ -547,6 +547,99 @@ Last full review: 2026-10-18.
     - *Not restored at 0.8 px:* treat 0.8 px as beyond reach, and require
       a front end at or below 0.25 px.
 
+- **Noisy-state and start-state results (2026-10-18,
+  `runs/oracles/context_oracle/` with `start_context` 16, seeds 0–2,
+  k1, mean over ×0.5/×0.4/×0.3):**
+
+  | noise, training velocity | nominal h20 lag / mlp | true-start ratio | `shoot` ratio | `backward` ratio | `shoot` floor (true dynamics) |
+  |---|---|---|---|---|---|
+  | 0 | 0.0087 / 0.0077 | 3.8 | n/a | n/a | n/a |
+  | 0.08 px, central | 0.014 / 0.014 | 2.15 ± 0.23 | 1.93 ± 0.16 | 1.31 | 0.003–0.005 |
+  | 0.25 px, central | 0.018 / 0.050 | 1.86 ± 0.08 | 1.67 ± 0.06 | 1.05 | 0.007–0.008 |
+  | 0.25 px, savgol | 0.026 / 0.026 | 1.32 ± 0.09 | 1.32 ± 0.06 | 1.11 | 0.007 |
+  | 0.8 px, central | 0.154 / 0.158 | 0.81 | 0.82 | 0.95 | 0.021–0.023 |
+  | 0.8 px, savgol | 0.026 / 0.031 | 1.57 ± 0.26 | 1.54 ± 0.26 | n/a | 0.021 |
+
+  - Against the written predictions:
+    - *Start-state floor:* with the true dynamics, `shoot` reaches 0.007
+      at 0.25 px with 16 frames, 20× below `backward` (0.14–0.15).
+      Confirmed; quick check with 8 frames: 0.015.
+    - *Ratio recovers with `shoot`:* confirmed at 0.08 and 0.25 px.
+      The 8-frame run of the written rule is being repeated with the
+      robust (Levenberg–Marquardt) solver.
+    - *Smoothed velocities:* at 0.8 px nominal accuracy is restored
+      (0.154 → 0.026, predicted below 0.04), and the ratio is ≥ 1.3
+      (1.57). Confirmed. At 0.25 px the MLP's penalty falls
+      (0.050 → 0.026, predicted below 0.025, so a narrow miss), but the
+      Lagrangian gets worse (0.018 → 0.026). That was not predicted.
+  - Reading:
+    - Random actions change every frame, so velocity is not smooth at
+      the frame scale. A 9-frame smoother trades noise for bias, which
+      pays off only when the noise is large.
+    - With central differences the Lagrangian tolerates noisy training
+      data far better than the MLP (0.25 px: 0.018 vs 0.050 nominal).
+      That is a second, separate benefit of structure.
+    - `quadfit` is useless here (worse than `backward` at 16 frames)
+      for the same reason: a quadratic cannot follow random-action
+      motion.
+    - Learned-model `shoot` errors are 1.5× their true-start errors, while
+      the true-dynamics `shoot` floor is near the true-start floor. So
+      residual model error, not the estimator, limits the start state.
+  - **Requirements for the pixel version:**
+    - a model-based start state (filtering or shooting over at least 8
+      frames);
+    - a front end at or below about 0.25 px, or smoothed training
+      velocities at higher noise;
+    - windows restricted to frames where the system is in view (A-VIEW-1).
+  - The principled replacement for both stencils is to infer the
+    training windows' start states jointly with the dynamics, which is
+    what a sequence posterior does. Not tested yet.
+
+- **Start-state result under the written rule (8 context frames,
+  Levenberg–Marquardt `shoot`, seeds 0–2, central training velocities):**
+
+  | noise | `shoot` ratio k1 / k5 | per-seed k1 | `backward` k1 | `shoot` floor (true dynamics) |
+  |---|---|---|---|---|
+  | 0.08 px | 1.91 ± 0.16 / 1.87 ± 0.22 | 1.97, 2.07, 1.69 | 1.31 | 0.006 |
+  | 0.25 px | 1.67 ± 0.08 / 1.66 ± 0.15 | 1.56, 1.74, 1.69 | 1.06 | 0.015 |
+  | 0.8 px | 0.82 / 0.81 | 0.81, 0.84, 0.80 | 0.96 | 0.050 |
+
+  - **Decision (written rule): ≥ 1.3 at 0.25 px.** The pixel version
+    needs a model-based start state (filtering or shooting) and a front
+    end at about 0.25 px. With smoothed training velocities, 0.8 px also
+    works (1.54, 16 frames).
+- **Encoder poses instead of simulated noise (prediction written
+  2026-10-18, before running):**
+  - Setup:
+    - A supervised pose encoder (rung 2; conv, and separately keypoint;
+      20000 steps, cosine schedule, 150 nominal training episodes) reads
+      `(x, θ)` from rendered frames of every training and shift episode
+      (`oracles.pixel_pose`, renders match the dataset to 1/255).
+    - Only windows whose frames all have the cart and pole tip in view
+      are used (A-VIEW-1).
+    - Central training velocities; `shoot` with 8 context frames; same
+      shifts and seeds as the noise test.
+    - Mass and gear do not change the appearance, so the nominal-trained
+      encoder applies to every environment.
+  - What differs from Gaussian noise: errors depend on the pose. Typical
+    visible frames are at 0.1–0.4 px, but a few percent are gross
+    outliers (sideways and upright poses, θ errors of tens of degrees).
+  - Prediction:
+    - True-start ratio ≥ 1.3 (about 70%).
+    - `shoot` ratio ≥ 1.3 (about 55%). Outliers in the context frames
+      can wreck a least-squares start state, and outliers in the training
+      targets hurt the MLP's MSE fit more than the Lagrangian's.
+    - The conv encoder (lower median error, worse tail) beats the
+      keypoint encoder on nominal accuracy.
+  - Decision rule (k1, mean over shifts and seeds, `shoot`):
+    - *≥ 1.3 with either encoder:* a two-stage pixel pipeline
+      (supervised encoder, then structured dynamics) preserves H1b. Next,
+      remove the pose labels: a self-supervised keypoint front end
+      (A-FE-1).
+    - *< 1.3 with both:* look at the outliers first (robust loss,
+      outlier rejection in the shooting fit) before any end-to-end pixel
+      training.
+
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**
   - Setup: as the context oracle, but the five training environments vary
@@ -573,6 +666,27 @@ Last full review: 2026-10-18.
       extrapolates gain (inspect its learned contexts).
     - *Lagrangian worse:* diagnose (slot misuse, recipe selection) before
       drawing conclusions.
+
+- **Second parameter, actuator gear: result (2026-10-18,
+  `runs/oracles/context_oracle/`, train envs `gear_x*`, seeds 0–2):**
+  **confirmed**, and it passes the written rule.
+
+  | shift | ratio k1 | ratio k5 | lag_ctx / mlp_ctx h20 (k1) | zero-shot |
+  |---|---|---|---|---|
+  | ×1.3 (inside) | 1.02 ± 0.13 | 0.97 ± 0.04 | 0.0098 / 0.0100 | 0.027 |
+  | ×0.5 | 1.15 ± 0.07 | 1.13 ± 0.02 | 0.0035 / 0.0040 | 0.032 |
+  | ×2 | 1.84 ± 0.10 | 1.90 ± 0.07 | 0.0155 / 0.0286 | 0.068 |
+  | ×3 | 4.0 ± 0.5 | 4.5 ± 0.9 | 0.022 / 0.088 | 0.116 |
+
+  - Every seed has ×3 > ×2 > 1.7. Nominal h20 errors are 0.0082–0.0094
+    (Lagrangian) and 0.0077–0.0086 (MLP).
+  - The learned Lagrangian gear contexts show the same near-gauge as the
+    mass contexts. `o₀` stays near 0.55 while the gain grows, and
+    `(1 + o₀) / exp(g)` matches `1 / scale` within 2.5% (seed 0).
+  - So H1b on true state holds for two parameters, inertia and actuation,
+    with the same pattern: parity inside the range, a growing advantage
+    outside it, and no discrimination on the side where the system moves
+    less.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.
@@ -661,6 +775,27 @@ Last full review: 2026-10-18.
   - KeyCLD's heatmap↔blob loss;
   - the overfit test with the renderer frozen from the decoder oracle
     (isolates encoder learning).
+- **Rung 2b, frozen renderer (prediction written 2026-10-18, before
+  running; `scripts/oracles/frozen_renderer_oracle.py`):**
+  - Setup: fit the geometric renderer from true poses (3000 steps), freeze
+    it, then train an encoder from reconstruction loss alone (6000 steps,
+    cosine schedule). Both keypoint and conv encoders. Poses are scored in
+    metric units, because the frozen renderer fixes the gauge.
+  - Prediction:
+    - x is learned (correlation > 0.95): the cart blob is large and
+      overlaps its target from most starting points.
+    - θ fails for many frames: more than 20% flipped by over 90°, and a
+      median error on in-view frames above 3° (about 60% confidence).
+      Mechanism: when the rendered pole does not overlap the real one,
+      the reconstruction gradient with respect to θ vanishes, so frames
+      that start in the wrong basin stay there.
+  - Decision rule:
+    - *Flips dominate:* add a coarse-to-fine curriculum (wide blobs or
+      blurred targets early) or KeyCLD's heatmap loss, and re-test this
+      rung.
+    - *Works (median ≤ 3°, few flips):* the end-to-end failure comes from
+      joint co-adaptation. Warm-start the renderer, or alternate the
+      updates.
 
 ### A-ENC-1 — CNN regresses the state
 - **Status:** supported for x; partial for θ.

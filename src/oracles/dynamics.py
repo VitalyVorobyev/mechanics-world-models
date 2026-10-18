@@ -197,7 +197,8 @@ def _windows(
     With ``rail_margin`` set, windows whose cart reaches ``|x| >= 1.8 - margin``
     (start or any target frame) are dropped. ``rail_reference`` (``qpos``-shaped,
     default ``episodes.qpos``) decides that, so noisy and clean views of the
-    same episodes keep the same windows.
+    same episodes keep the same windows. With ``episodes.valid`` set, windows
+    containing an invalid frame are dropped too.
     """
 
     qpos, qvel, actions = episodes.qpos, episodes.qvel, episodes.actions
@@ -212,6 +213,12 @@ def _windows(
         reach = np.stack([np.abs(ref[:, s : s + horizon + 1, 0]).max(axis=1) for s in starts], axis=1)
         keep = reach.reshape(-1) < SLIDER_LIMIT - rail_margin
         q0, v0, act, tgt = q0[keep], v0[keep], act[keep], tgt[keep]
+    else:
+        keep = np.ones(q0.shape[0], dtype=bool)
+    if episodes.valid is not None:
+        ok = np.stack([episodes.valid[:, s : s + horizon + 1].all(axis=1) for s in starts], axis=1).reshape(-1)
+        ok = ok[keep]
+        q0, v0, act, tgt = q0[ok], v0[ok], act[ok], tgt[ok]
     as_t = lambda a: torch.as_tensor(a, dtype=torch.float32)  # noqa: E731
     return as_t(q0), as_t(v0), as_t(act), as_t(tgt)
 
@@ -297,11 +304,14 @@ def free_segments(episodes: StateEpisodes, length: int, rail_margin: float | Non
 
 
 def _subset(episodes: StateEpisodes, segments: Sequence[tuple[int, int]], length: int) -> StateEpisodes:
+    frames = lambda a, extra=1: None if a is None else np.stack([a[e, s : s + length + extra] for e, s in segments])  # noqa: E731
     return StateEpisodes(
-        qpos=np.stack([episodes.qpos[e, s : s + length + 1] for e, s in segments]),
-        qvel=np.stack([episodes.qvel[e, s : s + length + 1] for e, s in segments]),
-        actions=np.stack([episodes.actions[e, s : s + length] for e, s in segments]),
+        qpos=frames(episodes.qpos),
+        qvel=frames(episodes.qvel),
+        actions=frames(episodes.actions, 0),
         frame_dt=episodes.frame_dt,
+        observed_qpos=frames(episodes.observed_qpos),
+        valid=frames(episodes.valid),
     )
 
 

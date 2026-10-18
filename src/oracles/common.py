@@ -116,12 +116,29 @@ def _git_commit() -> str | None:
 
 @dataclass
 class StateEpisodes:
-    """Ground-truth trajectories: ``qpos``/``qvel`` ``[E, N+1, 2]``, ``actions`` ``[E, N, A]``."""
+    """Ground-truth trajectories: ``qpos``/``qvel`` ``[E, N+1, 2]``, ``actions`` ``[E, N, A]``.
+
+    Optional: ``observed_qpos [E, N+1, 2]``, poses as a front end reads them
+    (e.g. a pixel encoder), used by ``noisy_observation`` instead of the true
+    poses; ``valid [E, N+1]`` (bool), frames that windows may use (e.g. the
+    system is in view).
+    """
 
     qpos: np.ndarray
     qvel: np.ndarray
     actions: np.ndarray
     frame_dt: float
+    observed_qpos: np.ndarray | None = None
+    valid: np.ndarray | None = None
+
+    def select(self, index) -> "StateEpisodes":
+        """Episodes ``index`` (a slice or index array), optional fields included."""
+
+        pick = lambda a: None if a is None else a[index]  # noqa: E731
+        return StateEpisodes(
+            qpos=self.qpos[index], qvel=self.qvel[index], actions=self.actions[index], frame_dt=self.frame_dt,
+            observed_qpos=pick(self.observed_qpos), valid=pick(self.valid),
+        )
 
 
 def load_state_episodes(
@@ -210,7 +227,8 @@ def noisy_observation(
     """
 
     rng = np.random.default_rng(seed)
-    qpos = episodes.qpos + rng.normal(size=episodes.qpos.shape) * np.array([sigma_x, sigma_theta])
+    base = episodes.qpos if episodes.observed_qpos is None else episodes.observed_qpos
+    qpos = base + rng.normal(size=base.shape) * np.array([sigma_x, sigma_theta])
     dt = episodes.frame_dt
     qvel = np.empty_like(qpos)
     if velocity == "backward":
@@ -228,7 +246,7 @@ def noisy_observation(
             qvel[:, half : frames - half] = slope
     else:
         raise ValueError(f"unknown velocity stencil {velocity!r}")
-    return StateEpisodes(qpos=qpos, qvel=qvel, actions=episodes.actions, frame_dt=dt)
+    return StateEpisodes(qpos=qpos, qvel=qvel, actions=episodes.actions, frame_dt=dt, valid=episodes.valid)
 
 
 def load_shift_splits(dataset_dir: Path, seed: int = 0) -> tuple[StateEpisodes, StateEpisodes, StateEpisodes]:
@@ -237,11 +255,5 @@ def load_shift_splits(dataset_dir: Path, seed: int = 0) -> tuple[StateEpisodes, 
     held_out = load_state_episodes(dataset_dir, split="val", val_fraction=0.5, seed=seed)
     half = held_out.qpos.shape[0] // 2
 
-    def part(index: slice) -> StateEpisodes:
-        return StateEpisodes(
-            qpos=held_out.qpos[index], qvel=held_out.qvel[index], actions=held_out.actions[index],
-            frame_dt=held_out.frame_dt,
-        )
-
     train = load_state_episodes(dataset_dir, split="train", val_fraction=0.5, seed=seed)
-    return train, part(slice(0, half)), part(slice(half, None))
+    return train, held_out.select(slice(0, half)), held_out.select(slice(half, None))

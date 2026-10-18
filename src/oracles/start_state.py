@@ -71,10 +71,13 @@ def context_windows(
     q0, v0 = clean.qpos[:, starts], clean.qvel[:, starts]
     flat = lambda a: a.reshape(-1, *a.shape[2:])  # noqa: E731
     obs, act, tgt, q0, v0 = map(flat, (obs, act, tgt, q0, v0))
+    keep = np.ones(obs.shape[0], dtype=bool)
     if rail_margin is not None:
         reach = np.stack([np.abs(clean.qpos[:, s - context : s + horizon + 1, 0]).max(axis=1) for s in starts], 1)
-        keep = reach.reshape(-1) < SLIDER_LIMIT - rail_margin
-        obs, act, tgt, q0, v0 = (a[keep] for a in (obs, act, tgt, q0, v0))
+        keep &= reach.reshape(-1) < SLIDER_LIMIT - rail_margin
+    if clean.valid is not None:
+        keep &= np.stack([clean.valid[:, s - context : s + horizon + 1].all(axis=1) for s in starts], 1).reshape(-1)
+    obs, act, tgt, q0, v0 = (a[keep] for a in (obs, act, tgt, q0, v0))
     return ContextWindows(obs, act, q0, v0, tgt, context, clean.frame_dt)
 
 

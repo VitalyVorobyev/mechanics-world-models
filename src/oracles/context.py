@@ -357,6 +357,7 @@ def run_context_oracle(
     shift_scales: dict[str, dict[str, float] | None] | None = None,
     start_context: int = 0,
     train_velocity: str = "central",
+    pose_source: str | None = None,
     cache_dir: Path | None = None,
     log=print,
 ) -> OracleResult:
@@ -374,6 +375,9 @@ def run_context_oracle(
     recipe and compares start-state estimators that use that many context
     frames (``oracles.start_state``), with the true-dynamics floor for each:
     ``{shift}.k{k}.{mode}.start.{estimator}.dev_h*``.
+    ``pose_source`` names where ``observed_qpos`` of the given episodes came
+    from (e.g. a pixel encoder, ``oracles.pixel_pose``); it switches on the
+    observed-pose path even without added noise and enters the cache keys.
     """
 
     env_names = list(train_envs)
@@ -400,7 +404,7 @@ def run_context_oracle(
         "shifts": list(shifted),
         "frame_dt": nominal_val.frame_dt,
     }
-    noisy = any(s > 0 for s in pose_noise)
+    noisy = any(s > 0 for s in pose_noise) or pose_source is not None
     pretrain_keys = (
         "train_envs", "train_episodes", "train_horizon", "pretrain_steps", "batch_size", "lr", "n_substeps",
         "rail_margin", "actuated_dims", "seed", "frame_dt",
@@ -408,6 +412,9 @@ def run_context_oracle(
     if noisy:  # only then, so earlier caches keep their hashes
         config["pose_noise"] = list(pose_noise)
         pretrain_keys += ("pose_noise",)
+        if pose_source is not None:
+            config["pose_source"] = pose_source
+            pretrain_keys += ("pose_source",)
         if train_velocity != "central":
             config["train_velocity"] = train_velocity
             pretrain_keys += ("train_velocity",)

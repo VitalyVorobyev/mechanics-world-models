@@ -17,6 +17,7 @@ Encoders:
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -56,6 +57,26 @@ class _PoseEncoder(nn.Module):
         q = keypoints_to_cartpole_q(keypoints)
         x = (q[:, 0] - self.offset) / self.scale
         return torch.stack([x, torch.cos(q[:, 1]), torch.sin(q[:, 1])], dim=-1)
+
+
+def load_pose_encoder(path: Path, device: str = "cpu") -> _PoseEncoder:
+    """A pose encoder saved by ``run_encoder_oracle(save_path=...)``, in eval mode."""
+
+    payload = torch.load(path, map_location=device, weights_only=True)
+    model = _PoseEncoder(payload["kind"]).to(device)
+    model.load_state_dict(payload["state_dict"])
+    return model.eval()
+
+
+@torch.no_grad()
+def encode_poses(model: _PoseEncoder, images: np.ndarray, device: str = "cpu", batch: int = 512) -> np.ndarray:
+    """``images uint8 [N, H, W, 3]`` -> ``(x, theta) [N, 2]`` with theta in (-pi, pi]."""
+
+    out = []
+    for begin in range(0, len(images), batch):
+        pred = model(_images(images[begin : begin + batch], torch.device(device))).cpu().numpy()
+        out.append(np.stack([pred[:, 0], np.arctan2(pred[:, 2], pred[:, 1])], axis=-1))
+    return np.concatenate(out)
 
 
 def _images(batch: np.ndarray, device: torch.device) -> torch.Tensor:
@@ -140,6 +161,7 @@ def run_encoder_oracle(
     device: str = "cpu",
     seed: int = 0,
     schedule: str = "constant",
+    save_path: Path | None = None,
     log=print,
 ) -> OracleResult:
     """Fit pixels -> pose; criterion: held-out R² >= 0.95 on (x, cos, sin)."""
@@ -164,6 +186,9 @@ def run_encoder_oracle(
         if step % max(steps // 10, 1) == 0:
             log(f"[{kind}] step {step} loss {loss.item():.5f} ({time.time() - start:.0f}s)")
     model.eval()
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"kind": kind, "state_dict": model.state_dict()}, save_path)
     preds = []
     with torch.no_grad():
         for begin in range(0, len(val_images), 256):

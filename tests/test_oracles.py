@@ -316,3 +316,58 @@ def test_savgol_velocity_is_less_noisy_than_central() -> None:
         reference = noisy_observation(clean, 0.0, 0.0, seed=0, velocity=stencil)  # same stencil, no noise
         errors[stencil] = (observed.qvel - reference.qvel)[:, 10:-10].std()
     assert errors["savgol"] < 0.3 * errors["central"]
+
+
+def test_context_oracle_uses_observed_poses_and_valid_frames(tmp_path: Path) -> None:
+    from oracles.context import run_context_oracle
+
+    def observed(episodes):
+        rng = np.random.default_rng(0)
+        valid = np.ones(episodes.qpos.shape[:2], dtype=bool)
+        valid[:, 30:35] = False  # e.g. out of view
+        episodes.observed_qpos = episodes.qpos + 0.01 * rng.normal(size=episodes.qpos.shape)
+        episodes.valid = valid
+        return episodes
+
+    train_envs = {"nominal": observed(_synthetic_episodes(3, 60, 1.0, 0)), "light": observed(_synthetic_episodes(3, 60, 0.7, 5))}
+    shifted = {"heavy": tuple(observed(_synthetic_episodes(n, 60, 2.0, s)) for n, s in ((3, 2), (2, 3), (2, 4)))}
+    result = run_context_oracle(
+        train_envs, _synthetic_episodes(2, 60, 1.0, 1), shifted, ks=(1,), segment_length=20, train_horizon=4,
+        pretrain_steps=3, adapt_lrs=(1e-3,), adapt_checkpoints=(0, 2), batch_size=8, eval_horizons=(5, 20),
+        rail_margin=None, modes=("lag_ctx", "mlp_ctx"), pose_source="test", start_context=4, cache_dir=tmp_path,
+        log=lambda _: None,
+    )
+    assert result.config["pose_source"] == "test"
+    assert np.isfinite(result.metrics["heavy.k1.mlp_ctx.start.shoot.dev_h20"])
+
+
+def test_windows_drop_invalid_frames() -> None:
+    from oracles.dynamics import _windows
+
+    episodes = _synthetic_episodes(1, 40, 1.0, 0)
+    full = _windows(episodes, 5)[0].shape[0]
+    episodes.valid = np.ones((1, 41), dtype=bool)
+    episodes.valid[0, 20] = False
+    assert _windows(episodes, 5)[0].shape[0] == full - 6  # starts 15..20 contain frame 20
+
+
+def test_rendered_states_feed_the_pose_encoder() -> None:
+    pytest.importorskip("dm_control")
+    from oracles.encoder import _PoseEncoder
+    from oracles.pixel_pose import with_encoder_poses
+
+    episodes = _synthetic_episodes(1, 6, 1.0, 0)
+    out = with_encoder_poses(episodes, None, _PoseEncoder("conv").eval())
+    assert out.observed_qpos.shape == episodes.qpos.shape and out.valid.shape == episodes.qpos.shape[:2]
+
+
+def test_frozen_renderer_oracle_runs() -> None:
+    from oracles.frozen_render import run_frozen_renderer_oracle
+
+    rng = np.random.default_rng(0)
+    images = rng.integers(0, 255, size=(8, 84, 84, 3), dtype=np.uint8)
+    qpos = rng.normal(size=(8, 2))
+    result = run_frozen_renderer_oracle(
+        images, qpos, images, qpos, decoder_steps=2, encoder_steps=2, batch_size=4, log=lambda _: None,
+    )
+    assert np.isfinite(result.metrics["theta_err_deg_median"])

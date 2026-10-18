@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("--device", default="mps")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--schedule", choices=("constant", "cosine"), default="constant")
+    parser.add_argument("--save", type=Path, default=None, help="save the trained encoder (for --encoder elsewhere)")
     args = parser.parse_args()
     train_images, train_qpos, _ = load_frames_with_state(
         args.dataset, split="train", max_episodes=args.train_episodes, seed=args.seed,
@@ -38,7 +39,7 @@ def main() -> None:
     result = run_encoder_oracle(
         train_images, train_qpos, val_images, val_qpos,
         kind=args.kind, steps=args.steps, batch_size=args.batch_size, lr=args.lr,
-        device=args.device, seed=args.seed, schedule=args.schedule, log=lambda m: print(m, flush=True),
+        device=args.device, seed=args.seed, schedule=args.schedule, save_path=args.save, log=lambda m: print(m, flush=True),
     )
     path = result.write()
     print({k: round(v, 5) for k, v in result.metrics.items()})
