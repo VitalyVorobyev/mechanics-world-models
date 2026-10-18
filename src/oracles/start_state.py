@@ -108,6 +108,8 @@ def shoot(
     diverge.
     """
 
+    if min(sigma) <= 0:
+        raise ValueError(f"shoot needs positive residual scales, got sigma={sigma}")
     obs, c, dt = w.observed, w.context, w.frame_dt
     weight = 1.0 / np.asarray(sigma)
     state = np.concatenate([obs[:, 0], (obs[:, 2] - obs[:, 0]) / (2 * dt)], axis=1)  # init [N, 4]

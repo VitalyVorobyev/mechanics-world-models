@@ -284,16 +284,20 @@ def _start_state_eval(
     from oracles.dynamics import fit
 
     horizons = tuple(eval_horizons)
+    # Residual weights for `shoot`. Encoder poses come without added noise; weighting by a zero sigma
+    # (infinite weights) froze the fit at its initial guess, so fall back to equal 0.01 m / 0.01 rad.
+    sigma = tuple(pose_noise) if all(v > 0 for v in pose_noise) else (0.01, 0.01)
+    version = "v2" if sigma == tuple(pose_noise) else "v2s"
     for shift_name, (shift_train, observed_train, segments, shift_test, salt) in per_shift.items():
         windows = context_windows(
             shift_test, observe(shift_test, salt + 2, velocity="backward"), horizon=max(horizons),
             context=start_context, stride=eval_stride, rail_margin=rail_margin,
         )
         if shift_scales is not None and shift_name in shift_scales:
-            key = f"starts{start_context}v2.{shift_name}.floor_true"
+            key = f"starts{start_context}{version}.{shift_name}.floor_true"
             if key not in cache.cells:
                 accel = TrueAcceleration(shift_scales[shift_name])
-                cache.save_cell(key, evaluate_starts(_true_rollout(accel, frame_dt), windows, horizons, sigma=pose_noise))
+                cache.save_cell(key, evaluate_starts(_true_rollout(accel, frame_dt), windows, horizons, sigma=sigma))
                 accel.close()
             for name, value in cache.cells[key].items():
                 metrics[f"{shift_name}.start_floor.{name}"] = value
@@ -303,7 +307,7 @@ def _start_state_eval(
                 rail_reference=_subset(shift_train, segments[:k], segment_length).qpos,
             )
             for mode in modes:
-                key = f"starts{start_context}v2.{shift_name}.k{k}.{mode}"
+                key = f"starts{start_context}{version}.{shift_name}.k{k}.{mode}"
                 if key not in cache.cells:
                     start = time.time()
                     form = "lagrangian" if mode.startswith("lag") else "mlp"
@@ -315,7 +319,7 @@ def _start_state_eval(
                             lr=float(lr), batch_size=batch_size, seed=seed + k,
                         )
                     cache.save_cell(
-                        key, evaluate_starts(_torch_rollout(adapted), windows, horizons, sigma=pose_noise),
+                        key, evaluate_starts(_torch_rollout(adapted), windows, horizons, sigma=sigma),
                     )
                     h = 20 if 20 in horizons else horizons[-1]
                     shoot = cache.cells[key][f"shoot.dev_h{h}"]

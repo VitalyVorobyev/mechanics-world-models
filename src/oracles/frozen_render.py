@@ -24,6 +24,7 @@ import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from models.losses import foreground_reconstruction_mask
 from oracles.common import Criterion, OracleResult
@@ -31,10 +32,22 @@ from oracles.decoder import _PoseDecoder, _to_images
 from oracles.encoder import _PoseEncoder, pose_errors
 
 
-def _reconstruction_loss(pred: torch.Tensor, target: torch.Tensor, foreground_weight: float) -> torch.Tensor:
+def _reconstruction_loss(
+    pred: torch.Tensor, target: torch.Tensor, foreground_weight: float, pool_sizes: tuple[int, ...] = (),
+) -> torch.Tensor:
+    """Pixel + foreground MSE, plus MSE between average-pooled copies (coarse-to-fine).
+
+    Pooling spreads the thin pole over many coarse pixels, so a rendered pole
+    that misses the real one still gets a gradient towards it.
+    """
+
     mask = foreground_reconstruction_mask(target[:, None])[:, 0].detach()
     se = (pred - target).square()
-    return se.mean() + foreground_weight * (se * mask).mean()
+    loss = se.mean() + foreground_weight * (se * mask).mean()
+    for size in pool_sizes:
+        pooled = lambda img: F.avg_pool2d(img, size, stride=max(size // 2, 1), padding=size // 2)  # noqa: E731
+        loss = loss + (pooled(pred) - pooled(target)).square().mean() * size
+    return loss
 
 
 def run_frozen_renderer_oracle(
@@ -49,11 +62,15 @@ def run_frozen_renderer_oracle(
     batch_size: int = 64,
     lr: float = 1e-3,
     foreground_weight: float = 1.0,
+    pool_sizes: tuple[int, ...] = (),
     device: str = "cpu",
     seed: int = 0,
     log=print,
 ) -> OracleResult:
-    """Criterion: held-out median angle error <= 3° on frames where the system is in view."""
+    """Criterion: held-out median angle error <= 3° on frames where the system is in view.
+
+    ``pool_sizes`` adds coarse-to-fine terms to the encoder's loss only.
+    """
 
     torch.manual_seed(seed)
     dev = torch.device(device)
@@ -88,7 +105,7 @@ def run_frozen_renderer_oracle(
     for step in range(1, encoder_steps + 1):
         idx = rng.integers(0, len(train_images), size=batch_size)
         target = _to_images(train_images[idx], dev)
-        loss = _reconstruction_loss(decoder(pose(target)), target, foreground_weight)
+        loss = _reconstruction_loss(decoder(pose(target)), target, foreground_weight, pool_sizes)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
@@ -126,6 +143,7 @@ def run_frozen_renderer_oracle(
             "batch_size": batch_size,
             "lr": lr,
             "foreground_weight": foreground_weight,
+            "pool_sizes": list(pool_sizes),
             "train_frames": int(len(train_images)),
             "val_frames": int(len(val_images)),
             "device": device,

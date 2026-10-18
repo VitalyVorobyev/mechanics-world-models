@@ -371,3 +371,19 @@ def test_frozen_renderer_oracle_runs() -> None:
         images, qpos, images, qpos, decoder_steps=2, encoder_steps=2, batch_size=4, log=lambda _: None,
     )
     assert np.isfinite(result.metrics["theta_err_deg_median"])
+
+
+def test_pooled_loss_gives_gradient_without_overlap() -> None:
+    import torch
+
+    from oracles.frozen_render import _reconstruction_loss
+
+    target = torch.zeros(1, 3, 84, 84)
+    target[..., 60:80, 40:44] = 1.0  # pole hanging
+    shift = torch.tensor(0.0, requires_grad=True)
+    rows, cols = torch.arange(84.0)[:, None], torch.arange(84.0)[None, :]
+    column = ((cols >= 40) & (cols < 44)).float()
+    pred = (torch.exp(-((rows - 20.0 - 40.0 * shift) ** 2) / 20.0) * column)[None, None].expand(1, 3, 84, 84)  # pole up
+    plain = torch.autograd.grad(_reconstruction_loss(pred, target, 1.0), shift, retain_graph=True)[0]
+    pooled = torch.autograd.grad(_reconstruction_loss(pred, target, 1.0, (24,)), shift)[0]
+    assert abs(float(pooled)) > 10 * abs(float(plain))

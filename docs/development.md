@@ -351,6 +351,19 @@ TAG=context_dose scripts/oracles/run_context.sh \
 TAG=context_noise_0.3px scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 --pose-noise 0.01 0.5
 # Another physical parameter: actuator gear (or gravity) for training and shifts
 TAG=context_gear scripts/oracles/run_context.sh --param actuator_gear_0 --sim-shift gear_x2=2
+# Start-state estimators from N noisy context frames (backward / quadfit / model-based
+# shooting), evaluation only: re-running a finished noisy config reuses its cells
+TAG=context_noise_0.3px scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 \
+    --pose-noise 0.01 0.5 --start-context 8
+# Smoothed (Savitzky-Golay, 9-frame) training velocities for high noise
+... --pose-noise 0.033 1.7 --train-velocity savgol
+# Poses read from rendered frames by a saved encoder (fully visible windows only)
+.venv/bin/python scripts/oracles/encoder_oracle.py --kind conv --steps 20000 --schedule cosine \
+    --train-episodes 150 --save runs/oracles/encoders/conv-cosine20k-150ep.pt
+TAG=context_encoder_conv scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 \
+    --encoder runs/oracles/encoders/conv-cosine20k-150ep.pt --start-context 8
+# Rung 2b: encoder learned without labels through a frozen renderer (A-FE-1)
+.venv/bin/python scripts/oracles/frozen_renderer_oracle.py --kind keypoint
 ```
 
 The encoder oracle reports the wrapped angle error in degrees and the

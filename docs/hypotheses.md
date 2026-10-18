@@ -640,6 +640,81 @@ Last full review: 2026-10-18.
       outlier rejection in the shooting fit) before any end-to-end pixel
       training.
 
+- **Encoder poses: result (2026-10-18, `runs/oracles/context_oracle/`
+  with `pose_source` `encoder:*`, seeds 0–2, k1, mean over three
+  shifts):** **fails the written rule with both encoders.**
+
+  | encoder (held-out visible θ rms) | nominal h20 lag / mlp | true-start ratio | `shoot` ratio (8 frames) | `shoot` floor, true dynamics |
+  |---|---|---|---|---|
+  | keypoint (1.5°) | 0.036 / 0.038 | 1.26 ± 0.09 | 1.17 ± 0.03 | 0.11 |
+  | conv (3.7°) | NaN (seed 0) or about 0.06 / 0.024 | 0.74 (seeds 1–2) | 0.70 | 0.12 |
+
+  - The true-dynamics `shoot` floor is 0.11. Gaussian noise at 0.25 px
+    gives 0.015, and 0.8 px gives 0.050. So the encoder's errors hurt
+    much more than their size suggests: they must be structured.
+  - With conv poses the Lagrangian is *worse* than the MLP, and seed 0's
+    pretraining diverged to NaN.
+  - Competing explanations:
+    - (a) heavy-tailed outliers that least squares cannot reject;
+    - (b) a pose-dependent bias, i.e. a distorted chart in which the true
+      dynamics are no longer of the assumed Lagrangian form. This would
+      hurt the structured model more than the MLP (cf. Wang 2026);
+    - (c) temporally correlated errors that bias finite-difference
+      velocities;
+    - (d) partially clipped frames near the image edge that pass the
+      2 px visibility margin.
+  - Discriminating test (cheap, no training): decompose the encoder error
+    on rendered simulation episodes into a smooth bias in the true pose
+    plus a residual. Measure the outlier fraction and the autocorrelation,
+    and recompute the true-dynamics `shoot` floor with each component
+    alone.
+
+- **Encoder-pose diagnosis (2026-10-18, scratchpad `enc_diag.py`; 10
+  rendered ×0.5 episodes, in-view frames):**
+  - **Bug found:** with encoder poses no Gaussian noise is added, so
+    `shoot` weighted its residuals by 1/σ = ∞ and never left its initial
+    guess. The `shoot` columns and floors of the encoder runs above are
+    invalid; true-start and `backward` are unaffected. Fixed with
+    fallback weights of 0.01 m / 0.01 rad, a guard in `shoot`, and a new
+    cache key. Re-running.
+  - With correct weights, the true-dynamics `shoot` floor on encoder
+    poses is 0.025 (keypoint) and 0.020 (conv), not 0.11. That lies
+    between the Gaussian levels of 0.25 px (0.015) and 0.8 px (0.050).
+
+  | | keypoint x / θ (px at tip) | conv x / θ |
+  |---|---|---|
+  | median error | 0.15 / 0.34 | 0.09 / 0.11 |
+  | rms error | 0.40 / 0.60 | 0.41 / 1.17 |
+  | smooth bias (median per pose bin), rms | 0.33 / 0.46 | 0.33 / 0.92 |
+  | residual rms | 0.22 / 0.41 | 0.26 / 0.69 |
+  | lag-1 autocorrelation, raw error | 0.84 / 0.66 | 0.79 / 0.89 |
+  | frames with error > 1 px | 3.2% / 9.8% | 1.9% / 1.5% |
+
+  - Reading: (a) outliers are rare; zeroing residuals over 1 px lowers
+    the `shoot` floor only from 0.019 to 0.017 (keypoint). The dominant
+    part is (b), a smooth pose-dependent bias, together with (c), errors
+    correlated in time. The conv encoder has the larger θ bias (0.92 px),
+    and its Lagrangian is the worse one, which fits (b): the structured
+    model needs a canonical chart, and the MLP does not care.
+  - **Prediction for the re-runs (written before running):**
+    - With fixed weights, `shoot` ratios come close to the true-start
+      ratios: keypoint about 1.2–1.3, conv below 1.
+    - With `--train-velocity savgol` (encoder errors are at the level
+      where smoothing paid off in the noise test), the keypoint
+      Lagrangian's nominal h20 improves from 0.036 to about 0.025, and
+      the true-start ratio reaches ≥ 1.3 (about 50%).
+    - Conv stays at or below parity, because its chart bias remains
+      (about 60%).
+  - Decision rule:
+    - *Keypoint + savgol ≥ 1.3:* the two-stage pipeline works with a
+      geometric (keypoint) front end. The front-end spec gains a bias
+      term: pose-dependent bias below about 0.5 px.
+    - *Otherwise:* chart bias is the limit. A structured world model
+      needs metric, canonical coordinates from its front end, which
+      favours a calibrated geometric front end (A-FE-1) over a generic
+      regressor. Test this directly: remove the encoder's binned bias
+      and re-run.
+
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**
   - Setup: as the context oracle, but the five training environments vary
@@ -687,6 +762,28 @@ Last full review: 2026-10-18.
     with the same pattern: parity inside the range, a growing advantage
     outside it, and no discrimination on the side where the system moves
     less.
+
+- **Third parameter, gravity: a misspecified slot (prediction written
+  2026-10-18, before running):**
+  - Setup: as the gear test, varying gravity (training ×1.0, 0.7, 0.85,
+    1.2, 1.4; tests ×1.3, ×0.5, ×2, ×3). True state, seeds 0–2.
+  - The Lagrangian's context has slots for the two diagonal mass entries
+    and the actuation gain, but none for the potential. Scaling gravity
+    by s is equivalent to scaling the whole of `M` and `B` by 1/s. The
+    diagonal offsets cannot scale the coupling `M₀₁`, so the slots can
+    only approximate a gravity change.
+  - Prediction:
+    - inside the range (×1.3): parity;
+    - outside it, the advantage is smaller than for mass or gear: ratio
+      between 0.8 and 1.5 at ×2 and ×3, with the Lagrangian possibly
+      worse at ×3.
+  - Decision rule:
+    - *Ratio ≥ 1.3 at ×2 and ×3:* the near-equivalence is good enough on
+      cartpole, and the advantage does not need an exact slot.
+    - *Otherwise:* the advantage needs the shifted parameter to have a
+      matching slot. Add a potential-scale slot (context dimension 4 for
+      both forms) and re-test, and state the slot requirement in the
+      claim.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.
@@ -796,6 +893,20 @@ Last full review: 2026-10-18.
     - *Works (median ≤ 3°, few flips):* the end-to-end failure comes from
       joint co-adaptation. Warm-start the renderer, or alternate the
       updates.
+- **Rung 2b result (2026-10-18, `runs/oracles/frozen_renderer_oracle_*`):**
+  the prediction is **confirmed**, and more starkly than predicted.
+  - Keypoint encoder: θ median error 157° on in-view frames (hanging
+    160°, sideways 111°, upright 25°), and x fails too (55 px rms).
+  - Conv encoder: x is learned (0.15 px rms on hanging frames), but θ
+    sits near upright for every frame (hanging 163°, upright 50°).
+  - So the encoder's angle stays where it started, upright: there the
+    rendered pole never overlaps the hanging real pole, and the gradient
+    with respect to θ is zero. The renderer is not at fault (rung 1).
+  - Per the rule: a coarse-to-fine loss. Average-pooled copies of the
+    rendered and target images (pool 8 and 24) are added to the loss.
+    - Prediction: flips (error over 90°) fall below 10%, and the median
+      error on in-view frames is ≤ 3° for the conv encoder (about 55%).
+    - If that fails, try KeyCLD's heatmap loss.
 
 ### A-ENC-1 — CNN regresses the state
 - **Status:** supported for x; partial for θ.

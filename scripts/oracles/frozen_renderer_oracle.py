@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("--decoder-steps", type=int, default=3000)
     parser.add_argument("--encoder-steps", type=int, default=6000)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--pool-sizes", type=int, nargs="*", default=[], help="coarse-to-fine terms, e.g. 8 24")
     parser.add_argument("--device", default="mps")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -36,7 +37,7 @@ def main() -> None:
     )
     result = run_frozen_renderer_oracle(
         train_images, train_qpos, val_images, val_qpos, kind=args.kind, decoder_steps=args.decoder_steps,
-        encoder_steps=args.encoder_steps, lr=args.lr, device=args.device, seed=args.seed,
+        encoder_steps=args.encoder_steps, lr=args.lr, pool_sizes=tuple(args.pool_sizes), device=args.device, seed=args.seed,
         log=lambda m: print(m, flush=True),
     )
     path = result.write()
