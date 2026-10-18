@@ -25,7 +25,9 @@ case "$ARM" in
     *) echo "ARM must be 'lagrangian' or 'mlp'" >&2; exit 1 ;;
 esac
 
-.venv/bin/train-mechanics \
+# exec: the trainer replaces this shell so SIGINT/SIGTERM reach it directly
+# (it then writes a resumable latest.pt and exits with code 130).
+exec .venv/bin/train-mechanics \
     --dataset-dir data/cartpole-swingup-random-100k-v2 \
     --checkpoint-dir "checkpoints/gate-${ARM}" \
     --sequence-length 32 --batch-size 32 --epochs 10 \
@@ -43,6 +45,7 @@ esac
     --learning-rate 1e-4 --warmup-steps 2000 \
     --reward-head --reward-weight 1.0 --imagined-reward-weight 1.0 \
     --auto-resume \
+    --checkpoint-every-steps 250 \
     --log-every-steps 50 \
     --val-open-loop-every-steps 500 \
     --val-open-loop-warmup 4 --val-open-loop-horizons 1,5,10,20

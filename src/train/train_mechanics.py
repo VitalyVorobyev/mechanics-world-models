@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,13 @@ from models.losses import foreground_reconstruction_mask
 from models.mechanics import (
     MechanicsWorldModel,
     compute_mechanics_world_model_loss,
+)
+from train.resumable import (
+    EpochResumableSampler,
+    GracefulStop,
+    ProgressTracker,
+    atomic_torch_save,
+    truncate_history,
 )
 from train.train_rssm import (
     average_totals,
@@ -106,6 +114,9 @@ class MechanicsTrainConfig:
     grad_clip: float = 100.0
     eval_every: int = 1
     log_every_steps: int = 100
+    # Mid-epoch ``latest.pt`` cadence (0 = epoch boundaries only). A stop
+    # signal (Ctrl-C / SIGTERM) always writes one before exiting.
+    checkpoint_every_steps: int = 0
     val_open_loop_every_steps: int = 0
     val_open_loop_warmup: int = 4
     val_open_loop_horizons: tuple[int, ...] = (1, 5, 10, 20)
@@ -245,6 +256,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--grad-clip", type=float, default=100.0)
     parser.add_argument("--eval-every", type=int, default=1)
     parser.add_argument("--log-every-steps", type=int, default=100)
+    parser.add_argument(
+        "--checkpoint-every-steps",
+        type=int,
+        default=0,
+        help="also write a resumable mid-epoch latest.pt every N steps (0 = off)",
+    )
     parser.add_argument("--val-open-loop-every-steps", type=int, default=0)
     parser.add_argument("--val-open-loop-warmup", type=int, default=4)
     parser.add_argument(
@@ -322,6 +339,7 @@ def config_from_args(args: argparse.Namespace) -> MechanicsTrainConfig:
         grad_clip=args.grad_clip,
         eval_every=args.eval_every,
         log_every_steps=args.log_every_steps,
+        checkpoint_every_steps=args.checkpoint_every_steps,
         val_open_loop_every_steps=args.val_open_loop_every_steps,
         val_open_loop_warmup=args.val_open_loop_warmup,
         val_open_loop_horizons=args.val_open_loop_horizons,
@@ -335,8 +353,12 @@ def config_from_args(args: argparse.Namespace) -> MechanicsTrainConfig:
     )
 
 
-def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
-    """Run offline mechanics world-model training and save checkpoints."""
+def train(config: MechanicsTrainConfig, console: Console | None = None) -> bool:
+    """Run offline mechanics world-model training and save checkpoints.
+
+    Returns True when training reached the final epoch, False when it was
+    stopped by a signal (a resumable ``latest.pt`` has been written).
+    """
 
     console = console or Console()
     validate_config(config)
@@ -372,13 +394,21 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
             crop_config=config.crop_config,
         )
 
+    # Per-epoch seeded permutation instead of ``shuffle=True`` so a mid-epoch
+    # checkpoint can resume at exactly the next unseen batch.
+    train_sampler = EpochResumableSampler(len(train_dataset), seed=config.seed)
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
-        shuffle=True,
+        sampler=train_sampler,
         num_workers=config.num_workers,
         drop_last=False,
+        # Own generator: otherwise each new epoch iterator draws its worker
+        # base seed from the global RNG, so a resumed run would shift the
+        # global RNG stream (posterior sampling) relative to an unbroken run.
+        generator=torch.Generator().manual_seed(config.seed),
     )
+    steps_per_epoch = math.ceil(len(train_dataset) / config.batch_size)
     val_loader = (
         DataLoader(
             val_dataset,
@@ -426,7 +456,7 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
-    total_steps = max(config.epochs * len(train_loader), 1)
+    total_steps = max(config.epochs * steps_per_epoch, 1)
     scheduler = build_lr_scheduler(
         optimizer,
         warmup_steps=config.warmup_steps,
@@ -435,9 +465,10 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
     )
     start_epoch = 1
     global_step = 0
+    partial: dict[str, Any] | None = None
 
     if resume_from is not None:
-        checkpoint_epoch, global_step = load_checkpoint(
+        checkpoint_epoch, global_step, partial = load_checkpoint_with_state(
             resume_from,
             model,
             optimizer,
@@ -446,18 +477,32 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
             expected_config=config,
         )
         start_epoch = checkpoint_epoch + 1
+        position = (
+            f"epoch {partial['epoch']} batch {partial['batches_done']}/{steps_per_epoch}"
+            if partial is not None
+            else f"start of epoch {start_epoch}"
+        )
         console.print(
             f"[bold yellow]resumed[/bold yellow] from {resume_from} "
-            f"epoch={checkpoint_epoch} global_step={global_step:07d} "
-            f"will run epochs {start_epoch}..{config.epochs}",
+            f"global_step={global_step:07d} at {position}",
         )
         if start_epoch > config.epochs:
             console.print(
                 "[bold red]nothing to do[/bold red]: checkpoint is at or past "
                 f"the requested final epoch {config.epochs}; raise --epochs to extend.",
             )
-            return
+            return True
+        dropped = truncate_history(history_path, global_step)
+        if dropped:
+            console.print(f"dropped {dropped} history row(s) logged after the checkpoint")
     prepare_history_file(history_path, resume=resume_from is not None)
+    progress = ProgressTracker(
+        config.checkpoint_dir / "progress.json",
+        total_steps=total_steps,
+        start_step=global_step,
+        total_epochs=config.epochs,
+    )
+    progress.update(epoch=start_epoch, global_step=global_step, status="starting")
 
     val_probe_batch: dict[str, torch.Tensor] | None = None
     if config.val_open_loop_every_steps > 0:
@@ -495,48 +540,105 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> None:
         config=config,
     )
 
-    for epoch in range(start_epoch, config.epochs + 1):
-        console.rule(f"[bold cyan]mechanics epoch {epoch:04d}[/]")
-        train_metrics, global_step = run_epoch(
-            model=model,
-            loader=train_loader,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            device=device,
-            config=config,
-            val_probe_batch=val_probe_batch,
-            epoch=epoch,
-            start_global_step=global_step,
-            history_path=history_path,
-            console=console,
-        )
-        emit_metrics("train_epoch", epoch, train_metrics, global_step, history_path, console)
-
-        val_metrics: dict[str, float] | None = None
-        if val_loader is not None and epoch % config.eval_every == 0:
-            val_metrics = evaluate(
+    with GracefulStop() as stop:
+        for epoch in range(start_epoch, config.epochs + 1):
+            resume_here = partial is not None and int(partial["epoch"]) == epoch
+            batches_done = int(partial["batches_done"]) if resume_here else 0
+            train_sampler.set_epoch(epoch, skip_samples=batches_done * config.batch_size)
+            console.rule(f"[bold cyan]mechanics epoch {epoch:04d}[/]")
+            state = EpochState(
+                totals=dict(partial["totals"]) if resume_here else {},
+                num_batches=int(partial["num_batches"]) if resume_here else 0,
+                batches_done=batches_done,
+            )
+            partial = None
+            train_metrics, global_step, stopped = run_epoch(
                 model=model,
-                loader=val_loader,
+                loader=train_loader,
+                optimizer=optimizer,
+                scheduler=scheduler,
                 device=device,
                 config=config,
+                val_probe_batch=val_probe_batch,
+                epoch=epoch,
+                start_global_step=global_step,
+                history_path=history_path,
+                console=console,
+                state=state,
+                stop=stop,
+                progress=progress,
             )
-            emit_metrics("val", epoch, val_metrics, global_step, history_path, console)
+            if stopped:
+                return False
+            _finish_epoch(
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                val_loader=val_loader,
+                device=device,
+                config=config,
+                epoch=epoch,
+                train_metrics=train_metrics,
+                global_step=global_step,
+                history_path=history_path,
+                console=console,
+            )
+            progress.update(epoch=epoch, global_step=global_step)
+    progress.update(epoch=config.epochs, global_step=global_step, status="finished")
+    return True
 
-        checkpoint_path = save_checkpoint(
-            checkpoint_dir=config.checkpoint_dir,
-            epoch=epoch,
+
+@dataclass
+class EpochState:
+    """Running per-epoch accumulators, persisted in mid-epoch checkpoints."""
+
+    totals: dict[str, float]
+    num_batches: int
+    batches_done: int
+
+
+def _finish_epoch(
+    model: MechanicsWorldModel,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LambdaLR,
+    val_loader: DataLoader | None,
+    device: torch.device,
+    config: MechanicsTrainConfig,
+    epoch: int,
+    train_metrics: dict[str, float],
+    global_step: int,
+    history_path: Path,
+    console: Console,
+) -> None:
+    """Emit epoch metrics, run validation, write the epoch checkpoint."""
+
+    emit_metrics("train_epoch", epoch, train_metrics, global_step, history_path, console)
+
+    val_metrics: dict[str, float] | None = None
+    if val_loader is not None and epoch % config.eval_every == 0:
+        val_metrics = evaluate(
             model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
+            loader=val_loader,
+            device=device,
             config=config,
-            metrics=val_metrics or train_metrics,
-            global_step=global_step,
-            history_path=history_path,
         )
-        console.print(
-            f"[green]saved checkpoint[/green] "
-            f"epoch_path={checkpoint_path} latest_path={config.checkpoint_dir / 'latest.pt'}",
-        )
+        emit_metrics("val", epoch, val_metrics, global_step, history_path, console)
+
+    checkpoint_path = save_checkpoint(
+        checkpoint_dir=config.checkpoint_dir,
+        epoch=epoch,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        metrics=val_metrics or train_metrics,
+        global_step=global_step,
+        history_path=history_path,
+    )
+    console.print(
+        f"[green]saved checkpoint[/green] "
+        f"epoch_path={checkpoint_path} latest_path={config.checkpoint_dir / 'latest.pt'}",
+    )
 
 
 def run_epoch(
@@ -551,12 +653,21 @@ def run_epoch(
     start_global_step: int,
     history_path: Path,
     console: Console,
-) -> tuple[dict[str, float], int]:
-    """Run one mechanics training epoch."""
+    state: EpochState | None = None,
+    stop: GracefulStop | None = None,
+    progress: ProgressTracker | None = None,
+) -> tuple[dict[str, float], int, bool]:
+    """Run (the rest of) one mechanics training epoch.
+
+    Returns ``(epoch_metrics, global_step, stopped)``. ``stopped`` is True when
+    a stop was requested; a mid-epoch checkpoint has then already been
+    written and the caller should return without finishing the epoch.
+    Mid-epoch checkpoints are also written every ``checkpoint_every_steps``.
+    """
 
     model.train()
-    totals: dict[str, float] = {}
-    num_batches = 0
+    state = state or EpochState(totals={}, num_batches=0, batches_done=0)
+    totals = state.totals
     global_step = start_global_step
 
     reward_enabled = config.reward_weight > 0.0 or config.imagined_reward_weight > 0.0
@@ -632,10 +743,13 @@ def run_epoch(
         batch_metrics["nuisance_alpha"] = float(model.transition.nuisance_alpha.detach().cpu())
         batch_metrics["step_skipped"] = float(step_skipped)
         update_totals(totals, batch_metrics)
-        num_batches += 1
+        state.num_batches += 1
+        state.batches_done += 1
         global_step += 1
         if global_step % config.log_every_steps == 0:
             emit_metrics("train", epoch, batch_metrics, global_step, history_path, console)
+            if progress is not None:
+                progress.update(epoch=epoch, global_step=global_step, metrics=batch_metrics)
         if (
             val_probe_batch is not None
             and config.val_open_loop_every_steps > 0
@@ -652,8 +766,37 @@ def run_epoch(
             emit_metrics(
                 "val_open_loop", epoch, probe_metrics, global_step, history_path, console,
             )
+            if progress is not None:
+                progress.update(epoch=epoch, global_step=global_step, probe=probe_metrics)
 
-    return average_totals(totals, num_batches), global_step
+        stop_now = stop is not None and stop.requested
+        periodic = (
+            config.checkpoint_every_steps > 0
+            and global_step % config.checkpoint_every_steps == 0
+        )
+        if stop_now or periodic:
+            save_partial_checkpoint(
+                checkpoint_dir=config.checkpoint_dir,
+                epoch=epoch,
+                state=state,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                config=config,
+                global_step=global_step,
+                history_path=history_path,
+            )
+            if stop_now:
+                console.print(
+                    f"[bold yellow]stop requested[/bold yellow]: saved latest.pt at "
+                    f"global_step={global_step} (epoch {epoch}, batch {state.batches_done}); "
+                    "rerun with --auto-resume to continue",
+                )
+                if progress is not None:
+                    progress.update(epoch=epoch, global_step=global_step, status="stopped")
+                return average_totals(totals, state.num_batches), global_step, True
+
+    return average_totals(totals, state.num_batches), global_step, False
 
 
 @torch.no_grad()
@@ -805,9 +948,50 @@ def save_checkpoint(
     }
     epoch_path = checkpoint_dir / f"epoch_{epoch:04d}.pt"
     latest_path = checkpoint_dir / "latest.pt"
-    torch.save(payload, epoch_path)
-    torch.save(payload, latest_path)
+    atomic_torch_save(payload, epoch_path)
+    atomic_torch_save(payload, latest_path)
     return epoch_path
+
+
+def save_partial_checkpoint(
+    checkpoint_dir: Path,
+    epoch: int,
+    state: EpochState,
+    model: MechanicsWorldModel,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LambdaLR,
+    config: MechanicsTrainConfig,
+    global_step: int,
+    history_path: Path,
+) -> Path:
+    """Write a mid-epoch ``latest.pt`` (no per-epoch file).
+
+    ``epoch`` in the payload stays the last *completed* epoch so older
+    loaders resume at an epoch boundary; ``partial_epoch`` carries what is
+    needed to resume at the next unseen batch instead.
+    """
+
+    payload = {
+        "epoch": epoch - 1,
+        "global_step": global_step,
+        "partial_epoch": {
+            "epoch": epoch,
+            "batches_done": state.batches_done,
+            "totals": dict(state.totals),
+            "num_batches": state.num_batches,
+        },
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "rng_state": capture_rng_state(),
+        "config": serializable_config(config),
+        "metrics": {},
+        "history_path": str(history_path),
+        "model_kind": "mechanics",
+    }
+    latest_path = checkpoint_dir / "latest.pt"
+    atomic_torch_save(payload, latest_path)
+    return latest_path
 
 
 def load_checkpoint(
@@ -819,6 +1003,22 @@ def load_checkpoint(
     expected_config: MechanicsTrainConfig | None = None,
 ) -> tuple[int, int]:
     """Load a mechanics-model checkpoint. Returns ``(epoch, global_step)``."""
+
+    epoch, global_step, _ = load_checkpoint_with_state(
+        path, model, optimizer, device, scheduler=scheduler, expected_config=expected_config,
+    )
+    return epoch, global_step
+
+
+def load_checkpoint_with_state(
+    path: Path,
+    model: MechanicsWorldModel,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    scheduler: torch.optim.lr_scheduler.LambdaLR | None = None,
+    expected_config: MechanicsTrainConfig | None = None,
+) -> tuple[int, int, dict[str, Any] | None]:
+    """Like ``load_checkpoint`` but also return the mid-epoch state, if any."""
 
     # weights_only=False because we store NumPy RNG / scheduler state /
     # config dataclass alongside the model weights — same rationale as
@@ -858,7 +1058,11 @@ def load_checkpoint(
         scheduler.load_state_dict(checkpoint["scheduler_state"])
     if "rng_state" in checkpoint:
         restore_rng_state(checkpoint["rng_state"])
-    return int(checkpoint["epoch"]), int(checkpoint.get("global_step", 0))
+    return (
+        int(checkpoint["epoch"]),
+        int(checkpoint.get("global_step", 0)),
+        checkpoint.get("partial_epoch"),
+    )
 
 
 def validate_resume_config(
@@ -889,6 +1093,8 @@ def validate_config(config: MechanicsTrainConfig) -> None:
         raise ValueError("eval_every must be >= 1")
     if config.log_every_steps < 1:
         raise ValueError("log_every_steps must be >= 1")
+    if config.checkpoint_every_steps < 0:
+        raise ValueError("checkpoint_every_steps must be >= 0")
     if config.q_dim < 1:
         raise ValueError("q_dim must be >= 1")
     if config.nuisance_dim < 1:
@@ -1020,7 +1226,8 @@ def main() -> None:
     config = config_from_args(build_arg_parser().parse_args())
     console.rule("[bold cyan]Mechanics training config[/]")
     console.print_json(json.dumps(serializable_config(config), indent=2))
-    train(config, console=console)
+    if not train(config, console=console):
+        sys.exit(130)  # stopped on request; rerun with --auto-resume
 
 
 if __name__ == "__main__":

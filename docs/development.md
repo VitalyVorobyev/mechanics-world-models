@@ -301,7 +301,28 @@ Resume from the latest checkpoint:
 ### Gate experiment (October 2026, current)
 
 See the review section of [`current_status.md`](current_status.md) for why
-and for the pass criteria. Two training arms plus one evaluation script:
+and for the pass criteria. The whole experiment runs as one resumable
+pipeline (OOD-v2 collection → both training arms → evaluation → report):
+
+```bash
+bash scripts/gate_pipeline.sh start    # background (nohup); logs in runs/gate/
+bash scripts/gate_pipeline.sh status   # stages, step/ETA, latest losses and live probe
+bash scripts/gate_pipeline.sh stop     # graceful: the trainer writes latest.pt and exits
+bash scripts/gate_pipeline.sh start    # continues where it stopped
+```
+
+Finished stages are skipped via `runs/gate/<stage>.done` markers. The
+trainer writes a resumable mid-epoch `latest.pt` every 250 steps
+(`--checkpoint-every-steps`) and whenever it receives SIGINT/SIGTERM, then
+exits with code 130. A rerun with `--auto-resume` continues at the next
+unseen batch (per-epoch seeded sampler) and drops history rows logged after
+the checkpoint; resumed runs are bit-identical to uninterrupted ones on CPU
+(`tests/test_train_resumable.py`). Each training run also maintains
+`checkpoints/<run>/progress.json` (step, s/step, ETA, latest metrics).
+`runs/gate/report.md` applies the gate criteria mechanically
+(`scripts/gate_report.py`).
+
+The individual steps can also be run by hand:
 
 ```bash
 bash scripts/train_gate.sh lagrangian   # B_main with pose forced through q

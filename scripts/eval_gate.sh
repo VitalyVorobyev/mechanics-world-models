@@ -29,6 +29,8 @@ DATASETS=(
     data/cartpole-ood-mass13-15k-v2
     data/cartpole-ood-length07-15k-v2
     data/cartpole-ood-length13-15k-v2
+    data/cartpole-ood-mass20-15k-v2
+    data/cartpole-ood-length15-15k-v2
 )
 
 for dataset in "${DATASETS[@]}"; do
