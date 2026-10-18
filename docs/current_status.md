@@ -1,5 +1,27 @@
 # Current Status and Open Problem
 
+## Latest (2026-10-18, evening): pivot to few-shot adaptation, protocol adopted
+
+- **The gate run was stopped** at step 3967 (resumable). A targeted
+  literature check and our own oracles showed it would test answered
+  questions with a decoder known to fail end to end:
+  - Lagrangian vs second-order MLP in distribution: near parity (KeyCLD);
+  - pole-mass shifts: dynamically invisible (A-OOD-2);
+  - zero-shot OOD: uninformative (H1-zs);
+  - random-data swing-up MPC: fails (A-DATA-1).
+- **New focus: H1b, few-shot adaptation to changed physics**, tested
+  state-first. The v1 dynamics oracle was inconclusive: the MLP overfits
+  at k = 1, and the nominal-accuracy prerequisite is not met. See
+  [`hypotheses.md`](hypotheses.md#h1b--few-shot-adaptation-current-focus)
+  for the result table and the v2 design.
+- **Pixel front end:** a keypoint encoder plus geometric renderer is
+  implemented. The renderer passes the decoder oracle; the encoder
+  localizes x well but the pole tip poorly (A-FE-1, A-ENC-1).
+- **Process:** [`research_protocol.md`](research_protocol.md) (oracle
+  ladder, predictions before runs, strong inference) is now binding, and
+  [`hypotheses.md`](hypotheses.md) is the source of truth for what the
+  project believes. The sections below are history.
+
 ## October 2026 Review (read this first)
 
 The project was paused from 2026-04-19 to 2026-10-18. A review on resume

@@ -18,6 +18,27 @@ direction.
 - Do not make research-performance claims in public docs unless they are backed
   by code, tests, or logged experiments in the repo.
 
+## Research Protocol (binding)
+
+Follow [`docs/research_protocol.md`](docs/research_protocol.md). In short:
+
+- [`docs/hypotheses.md`](docs/hypotheses.md) is the source of truth for
+  hypotheses *and* assumptions. Cite its IDs in other docs, and update it in
+  the same commit as the code or result that changes an entry.
+- Before any run longer than about an hour, write the prediction, the
+  decision rule and the prerequisite oracle results into the registry entry
+  it tests. A run whose outcome would change nothing is not run.
+- Climb the oracle ladder (`scripts/oracles/`: intervention effect,
+  decoder / encoder / dynamics oracles, overfit one batch, pilot) before
+  end-to-end training. Results go to `runs/oracles/`.
+- Report every metric next to its floor (copy last frame / mean image) and
+  its ceiling (oracle with true state).
+- For any surprise: list at least three explanations and run the cheapest
+  test that tells them apart, before planning further.
+- Long runs must be observable and resumable (progress file, mid-epoch
+  checkpoints, graceful stop). Compute-heavy runs need the user's go-ahead
+  for that experiment.
+
 ## Documentation
 
 - Keep `README.md` public-facing: concise motivation, current status, quick

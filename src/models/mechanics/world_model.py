@@ -22,8 +22,14 @@ from models.mechanics.coordinates import (
     validate_angle_dims,
     wrap_angle_dims,
 )
-from models.mechanics.encoder import FactoredEncoder, FactoredPosterior, derive_qdot_from_q
+from models.mechanics.encoder import (
+    FactoredEncoder,
+    FactoredPosterior,
+    KeypointFactoredEncoder,
+    derive_qdot_from_q,
+)
 from models.mechanics.integrator import semi_implicit_euler_step
+from models.mechanics.keypoints import GeometricRenderer
 from models.mechanics.lagrangian import (
     Actuation,
     Dissipation,
@@ -87,11 +93,19 @@ class MechanicsWorldModelOutput:
     imagined_target_start: int | None = None
     reward_predictions: torch.Tensor | None = None
     imagined_reward_predictions: torch.Tensor | None = None
+    # Mean squared (angle-wrapped) error of multi-start latent rollouts against
+    # the encoded q of later frames; 0-d, only when latent_dynamics_horizon > 0.
+    latent_dynamics_loss: torch.Tensor | None = None
+    # Mean squared distance between encoder keypoints and the renderer's
+    # keypoints for the same q; 0-d, only with keypoint encoder + renderer.
+    keypoint_consistency_loss: torch.Tensor | None = None
 
 
 NUISANCE_MODES = ("concat", "style")
 DYNAMICS_FORMS = ("lagrangian", "mlp")
 DISSIPATION_FORMS = ("rayleigh_mlp", "linear")
+ENCODER_TYPES = ("conv", "keypoint")
+DECODER_TYPES = ("deconv", "render")
 
 
 def _sample_normal(mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
@@ -145,10 +159,27 @@ class MechanicsWorldModel(nn.Module):
         dynamics_form: str = "lagrangian",
         dissipation_form: str = "rayleigh_mlp",
         mlp_dynamics_hidden_size: int = 128,
+        encoder_type: str = "conv",
+        decoder_type: str = "deconv",
     ) -> None:
         super().__init__()
         if nuisance_mode not in NUISANCE_MODES:
             raise ValueError(f"nuisance_mode must be one of {NUISANCE_MODES}")
+        if encoder_type not in ENCODER_TYPES:
+            raise ValueError(f"encoder_type must be one of {ENCODER_TYPES}")
+        if decoder_type not in DECODER_TYPES:
+            raise ValueError(f"decoder_type must be one of {DECODER_TYPES}")
+        if (encoder_type == "keypoint" or decoder_type == "render") and (
+            q_dim != 2 or tuple(angle_dims) != (1,)
+        ):
+            raise ValueError(
+                "keypoint encoder / render decoder are cartpole-specific: "
+                "require q_dim=2 and angle_dims=(1,)",
+            )
+        if decoder_type == "render" and nuisance_mode != "style":
+            raise ValueError("decoder_type='render' requires nuisance_mode='style'")
+        self.encoder_type = encoder_type
+        self.decoder_type = decoder_type
         self.action_dim = action_dim
         self.q_dim = q_dim
         self.nuisance_dim = nuisance_dim
@@ -168,18 +199,30 @@ class MechanicsWorldModel(nn.Module):
             self.feature_size = decoder_input_size
         self.reward_head_enabled = reward_head
 
-        self.encoder = FactoredEncoder(
-            q_dim=q_dim,
-            nuisance_dim=nuisance_dim,
-            dt=dt,
-            embedding_size=embedding_size,
-            head_hidden_size=encoder_head_hidden_size,
-            mech_min_std=mech_min_std,
-            nuisance_min_std=nuisance_min_std,
-            input_channels=input_channels,
-            qdot_stencil=qdot_stencil,
-            angle_dims=self.angle_dims,
-        )
+        self.encoder: FactoredEncoder | KeypointFactoredEncoder
+        if encoder_type == "keypoint":
+            self.encoder = KeypointFactoredEncoder(
+                nuisance_dim=nuisance_dim,
+                dt=dt,
+                head_hidden_size=encoder_head_hidden_size,
+                mech_min_std=mech_min_std,
+                nuisance_min_std=nuisance_min_std,
+                input_channels=input_channels,
+                qdot_stencil=qdot_stencil,
+            )
+        else:
+            self.encoder = FactoredEncoder(
+                q_dim=q_dim,
+                nuisance_dim=nuisance_dim,
+                dt=dt,
+                embedding_size=embedding_size,
+                head_hidden_size=encoder_head_hidden_size,
+                mech_min_std=mech_min_std,
+                nuisance_min_std=nuisance_min_std,
+                input_channels=input_channels,
+                qdot_stencil=qdot_stencil,
+                angle_dims=self.angle_dims,
+            )
         if dynamics_form not in DYNAMICS_FORMS:
             raise ValueError(f"dynamics_form must be one of {DYNAMICS_FORMS}")
         if dissipation_form not in DISSIPATION_FORMS:
@@ -235,11 +278,15 @@ class MechanicsWorldModel(nn.Module):
             nuisance_prior_min_std=nuisance_min_std,
             nuisance_alpha_init=nuisance_alpha_init,
         )
-        self.decoder = ImageDecoder(
-            feature_size=decoder_input_size,
-            output_channels=input_channels,
-            output_size=image_size,
-        )
+        self.decoder: ImageDecoder | GeometricRenderer
+        if decoder_type == "render":
+            self.decoder = GeometricRenderer(output_channels=input_channels, output_size=image_size)
+        else:
+            self.decoder = ImageDecoder(
+                feature_size=decoder_input_size,
+                output_channels=input_channels,
+                output_size=image_size,
+            )
         self.style_head: nn.Linear | None = None
         if nuisance_mode == "style":
             # Per-channel (gain, offset) on the decoder logits; zero-init so
@@ -301,7 +348,11 @@ class MechanicsWorldModel(nn.Module):
 
         if self.nuisance_mode == "style":
             assert self.style_head is not None
-            logits = self.decoder.decode_logits(embed_coordinates(q, self.angle_dims))
+            if isinstance(self.decoder, GeometricRenderer):
+                flat = self.decoder(q.reshape(-1, q.shape[-1]))
+                logits = flat.reshape(*q.shape[:-1], *flat.shape[1:])
+            else:
+                logits = self.decoder.decode_logits(embed_coordinates(q, self.angle_dims))
             gain, offset = torch.chunk(self.style_head(z), chunks=2, dim=-1)  # [B, T, C]
             logits = logits * (1.0 + gain[..., None, None]) + offset[..., None, None]
             return torch.sigmoid(logits)
@@ -313,8 +364,15 @@ class MechanicsWorldModel(nn.Module):
         actions: torch.Tensor,
         imagination_context_steps: int = 0,
         imagination_horizon: int = 0,
+        latent_dynamics_horizon: int = 0,
     ) -> MechanicsWorldModelOutput:
-        """Run a posterior+prior pass with optional prior imagination."""
+        """Run a posterior+prior pass with optional prior imagination.
+
+        ``latent_dynamics_horizon > 0`` also rolls the dynamics that many
+        steps from every frame and scores it against the encoded ``q``
+        (KeyCLD-style multi-start loss), which gives dense dynamics gradients
+        without decoding.
+        """
 
         posterior = self.encoder(observations)
         rollout = self._rollout(posterior=posterior, actions=actions)
@@ -350,7 +408,19 @@ class MechanicsWorldModel(nn.Module):
             if self.reward_head is not None and imagined_features is not None:
                 imagined_reward_predictions = self.reward_head(imagined_features).squeeze(-1)
 
+        latent_dynamics_loss: torch.Tensor | None = None
+        if latent_dynamics_horizon > 0:
+            latent_dynamics_loss = self.multi_start_latent_loss(
+                posterior, actions, latent_dynamics_horizon,
+            )
+        keypoint_consistency_loss: torch.Tensor | None = None
+        if posterior.keypoints is not None and isinstance(self.decoder, GeometricRenderer):
+            rendered = self.decoder.keypoints(posterior.q_mean)
+            keypoint_consistency_loss = (posterior.keypoints - rendered).square().sum(-1).mean()
+
         return MechanicsWorldModelOutput(
+            latent_dynamics_loss=latent_dynamics_loss,
+            keypoint_consistency_loss=keypoint_consistency_loss,
             rollout=rollout,
             reconstructions=reconstructions,
             imagined_reconstructions=imagined_reconstructions,
@@ -362,6 +432,47 @@ class MechanicsWorldModel(nn.Module):
             reward_predictions=reward_predictions,
             imagined_reward_predictions=imagined_reward_predictions,
         )
+
+    def multi_start_latent_loss(
+        self,
+        posterior: FactoredPosterior,
+        actions: torch.Tensor,
+        horizon: int,
+    ) -> torch.Tensor:
+        """Roll ``horizon`` integrator steps from every usable frame; L2 vs encoded q.
+
+        Starts at ``t = 1 .. T - 1 - horizon`` (``t = 0`` is skipped because
+        its finite-difference ``q̇`` reads frame 1). Start states use the
+        posterior means; targets are the encoder's ``q_{t+k}``, detached so
+        the loss trains the dynamics rather than pulling the encoder towards
+        whatever the dynamics predict. Angle residuals are wrapped.
+        Shapes: posterior ``[B, T, d]``, actions ``[B, T, A]``.
+        """
+
+        batch, steps, q_dim = posterior.q_mean.shape
+        num_starts = steps - 1 - horizon
+        if num_starts < 1:
+            raise ValueError(
+                f"latent_dynamics_horizon={horizon} needs sequence_length >= {horizon + 2}",
+            )
+        q = posterior.q_mean[:, 1 : 1 + num_starts].reshape(-1, q_dim)
+        qdot = posterior.qdot_mean[:, 1 : 1 + num_starts].reshape(-1, q_dim)
+        targets = posterior.q_mean.detach()
+        squared = q.new_zeros(())
+        for k in range(horizon):
+            action = actions[:, 1 + k : 1 + k + num_starts].reshape(-1, actions.shape[-1])
+            q, qdot = semi_implicit_euler_step(
+                dynamics=self.dynamics,
+                q=q,
+                qdot=qdot,
+                u=action,
+                dt=self.dt,
+                n_substeps=self.transition.n_substeps,
+            )
+            target = targets[:, 2 + k : 2 + k + num_starts].reshape(-1, q_dim)
+            residual = wrap_angle_dims(q - target, self.angle_dims)
+            squared = squared + residual.square().mean()
+        return squared / horizon
 
     def _rollout(
         self,

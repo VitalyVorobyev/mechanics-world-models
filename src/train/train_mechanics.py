@@ -88,6 +88,12 @@ class MechanicsTrainConfig:
     dynamics_form: str = "lagrangian"
     dissipation_form: str = "rayleigh_mlp"
     mlp_dynamics_hidden_size: int = 128
+    encoder_type: str = "conv"
+    decoder_type: str = "deconv"
+    kl_mech_scale: float = 1.0
+    latent_dynamics_weight: float = 0.0
+    latent_dynamics_horizon: int = 6
+    keypoint_consistency_weight: float = 0.0
     nuisance_alpha_init: float = 0.95
     mech_min_std: float = 0.05
     nuisance_min_std: float = 0.1
@@ -145,6 +151,8 @@ RESUME_GUARDED_CONFIG_KEYS: tuple[str, ...] = (
     "nuisance_mode",
     "dynamics_form",
     "dissipation_form",
+    "encoder_type",
+    "decoder_type",
     "crop_config",
 )
 # Values implied for guarded keys that checkpoints from before the key existed
@@ -155,6 +163,8 @@ LEGACY_CONFIG_DEFAULTS: dict[str, Any] = {
     "nuisance_mode": "concat",
     "dynamics_form": "lagrangian",
     "dissipation_form": "rayleigh_mlp",
+    "encoder_type": "conv",
+    "decoder_type": "deconv",
 }
 
 
@@ -228,6 +238,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="linear: constant PSD damping C q̇, provably passive",
     )
     parser.add_argument("--mlp-dynamics-hidden-size", type=int, default=128)
+    parser.add_argument(
+        "--encoder-type",
+        choices=("conv", "keypoint"),
+        default="conv",
+        help="keypoint: spatial-softmax cart/tip keypoints -> (x, theta) (cartpole)",
+    )
+    parser.add_argument(
+        "--decoder-type",
+        choices=("deconv", "render"),
+        default="deconv",
+        help="render: geometric blob renderer placing cart/pole from (x, theta) (cartpole)",
+    )
+    parser.add_argument(
+        "--kl-mech-scale",
+        type=float,
+        default=1.0,
+        help="multiplier on the q / q̇ KL branches (0 = deterministic mechanics coordinate)",
+    )
+    parser.add_argument("--latent-dynamics-weight", type=float, default=0.0)
+    parser.add_argument("--latent-dynamics-horizon", type=int, default=6)
+    parser.add_argument("--keypoint-consistency-weight", type=float, default=0.0)
     parser.add_argument("--nuisance-alpha-init", type=float, default=0.95)
     parser.add_argument("--mech-min-std", type=float, default=0.05)
     parser.add_argument("--nuisance-min-std", type=float, default=0.1)
@@ -311,6 +342,12 @@ def config_from_args(args: argparse.Namespace) -> MechanicsTrainConfig:
         dynamics_form=args.dynamics_form,
         dissipation_form=args.dissipation_form,
         mlp_dynamics_hidden_size=args.mlp_dynamics_hidden_size,
+        encoder_type=args.encoder_type,
+        decoder_type=args.decoder_type,
+        kl_mech_scale=args.kl_mech_scale,
+        latent_dynamics_weight=args.latent_dynamics_weight,
+        latent_dynamics_horizon=args.latent_dynamics_horizon,
+        keypoint_consistency_weight=args.keypoint_consistency_weight,
         nuisance_alpha_init=args.nuisance_alpha_init,
         mech_min_std=args.mech_min_std,
         nuisance_min_std=args.nuisance_min_std,
@@ -450,6 +487,8 @@ def train(config: MechanicsTrainConfig, console: Console | None = None) -> bool:
         dynamics_form=config.dynamics_form,
         dissipation_form=config.dissipation_form,
         mlp_dynamics_hidden_size=config.mlp_dynamics_hidden_size,
+        encoder_type=config.encoder_type,
+        decoder_type=config.decoder_type,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -690,6 +729,9 @@ def run_epoch(
                 config.imagination_context_steps if imagination_enabled else 0
             ),
             imagination_horizon=config.imagination_horizon if imagination_enabled else 0,
+            latent_dynamics_horizon=(
+                config.latent_dynamics_horizon if config.latent_dynamics_weight > 0.0 else 0
+            ),
         )
         losses = compute_mechanics_world_model_loss(
             outputs=outputs,
@@ -710,6 +752,9 @@ def run_epoch(
             kl_free_nats_nuisance=config.kl_free_nats_nuisance,
             reward_weight=config.reward_weight,
             imagined_reward_weight=config.imagined_reward_weight,
+            kl_mech_scale=config.kl_mech_scale,
+            latent_dynamics_weight=config.latent_dynamics_weight,
+            keypoint_consistency_weight=config.keypoint_consistency_weight,
         )
 
         optimizer.zero_grad(set_to_none=True)
@@ -831,6 +876,9 @@ def evaluate(
                 config.imagination_context_steps if imagination_enabled else 0
             ),
             imagination_horizon=config.imagination_horizon if imagination_enabled else 0,
+            latent_dynamics_horizon=(
+                config.latent_dynamics_horizon if config.latent_dynamics_weight > 0.0 else 0
+            ),
         )
         losses = compute_mechanics_world_model_loss(
             outputs=outputs,
@@ -851,6 +899,9 @@ def evaluate(
             kl_free_nats_nuisance=config.kl_free_nats_nuisance,
             reward_weight=config.reward_weight,
             imagined_reward_weight=config.imagined_reward_weight,
+            kl_mech_scale=config.kl_mech_scale,
+            latent_dynamics_weight=config.latent_dynamics_weight,
+            keypoint_consistency_weight=config.keypoint_consistency_weight,
         )
         update_totals(totals, tensor_metrics_to_float(losses))
         num_batches += 1
@@ -1109,6 +1160,8 @@ def validate_config(config: MechanicsTrainConfig) -> None:
         raise ValueError("dynamics_form must be 'lagrangian' or 'mlp'")
     if config.dissipation_form not in ("rayleigh_mlp", "linear"):
         raise ValueError("dissipation_form must be 'rayleigh_mlp' or 'linear'")
+    if config.latent_dynamics_weight > 0.0 and config.sequence_length < config.latent_dynamics_horizon + 2:
+        raise ValueError("sequence_length must be >= latent_dynamics_horizon + 2")
     if any(not 0 <= dim < config.q_dim for dim in config.angle_dims):
         raise ValueError("angle_dims entries must lie in [0, q_dim)")
     if config.n_substeps < 1:

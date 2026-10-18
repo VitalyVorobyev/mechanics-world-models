@@ -44,6 +44,8 @@ class FactoredPosterior:
     qdot_std: torch.Tensor  # [B, T, d] — pushforward of q_std through diff
     z_mean: torch.Tensor  # [B, T, k]
     z_std: torch.Tensor  # [B, T, k]
+    # Image-plane (u, v) keypoints [B, T, K, 2] when the keypoint encoder is used.
+    keypoints: torch.Tensor | None = None
 
 
 def derive_qdot_from_q(
@@ -223,4 +225,82 @@ class FactoredEncoder(nn.Module):
             qdot_std=qdot_std,
             z_mean=z_mean,
             z_std=z_std,
+        )
+
+
+class KeypointFactoredEncoder(nn.Module):
+    """Cartpole posterior from image keypoints: ``q = (x, theta)`` read geometrically.
+
+    ``KeypointEncoder`` locates the cart and the pole tip; ``q`` is computed
+    from them (``keypoints_to_cartpole_q``), so it is a position-like chart by
+    construction rather than a free per-frame code. ``q_std`` is a learned
+    per-coordinate constant (the keypoint estimate is deterministic); ``z``
+    comes from pooled conv features as in ``FactoredEncoder``. ``q̇`` is the
+    finite difference of ``q`` with the angle difference wrapped.
+    """
+
+    angle_dims: tuple[int, ...] = (1,)
+
+    def __init__(
+        self,
+        nuisance_dim: int,
+        dt: float,
+        feature_size: int = 128,
+        head_hidden_size: int = 128,
+        mech_min_std: float = 0.05,
+        nuisance_min_std: float = 0.1,
+        input_channels: int = 3,
+        qdot_stencil: str = "backward",
+    ) -> None:
+        super().__init__()
+        from models.mechanics.keypoints import KeypointEncoder
+
+        if nuisance_dim < 1:
+            raise ValueError("nuisance_dim must be >= 1")
+        if dt <= 0.0:
+            raise ValueError("dt must be > 0")
+        if qdot_stencil not in QDOT_STENCILS:
+            raise ValueError(f"qdot_stencil must be one of {QDOT_STENCILS}")
+        self.q_dim = 2
+        self.nuisance_dim = nuisance_dim
+        self.dt = dt
+        self.qdot_stencil = qdot_stencil
+        self.mech_min_std = mech_min_std
+        self.nuisance_min_std = nuisance_min_std
+        self.keypoint_encoder = KeypointEncoder(
+            num_keypoints=2, feature_size=feature_size, input_channels=input_channels,
+        )
+        self.q_raw_std = nn.Parameter(torch.full((2,), -3.0))
+        self.nuisance_head = nn.Sequential(
+            nn.Linear(feature_size, head_hidden_size),
+            nn.ELU(),
+            nn.Linear(head_hidden_size, 2 * nuisance_dim),
+        )
+
+    def forward(self, observations: torch.Tensor) -> FactoredPosterior:
+        from models.mechanics.keypoints import keypoints_to_cartpole_q
+
+        if observations.ndim != 5:
+            raise ValueError("observations must have shape [B, T, C, H, W]")
+        if observations.shape[1] < 2:
+            raise ValueError("KeypointFactoredEncoder requires T >= 2 to derive qdot")
+        batch, steps = observations.shape[:2]
+        keypoints, _, features = self.keypoint_encoder(observations.flatten(0, 1))
+        keypoints = keypoints.reshape(batch, steps, 2, 2)
+        q_mean = keypoints_to_cartpole_q(keypoints)  # [B, T, 2]
+        q_std = (F.softplus(self.q_raw_std) + self.mech_min_std).expand_as(q_mean)
+        nuis_raw = self.nuisance_head(features).reshape(batch, steps, -1)
+        z_mean, z_raw_std = torch.chunk(nuis_raw, chunks=2, dim=-1)
+        z_std = F.softplus(z_raw_std) + self.nuisance_min_std
+        qdot_mean, qdot_std = derive_qdot_from_q(
+            q_mean, q_std, dt=self.dt, stencil=self.qdot_stencil, angle_dims=self.angle_dims,
+        )
+        return FactoredPosterior(
+            q_mean=q_mean,
+            q_std=q_std,
+            qdot_mean=qdot_mean,
+            qdot_std=qdot_std,
+            z_mean=z_mean,
+            z_std=z_std,
+            keypoints=keypoints,
         )

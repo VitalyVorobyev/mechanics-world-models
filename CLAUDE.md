@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Research code for mechanics-structured visual world models for model-based RL on `dm_control cartpole-swingup` pixels. The repository contains **two trainable world models**: an unstructured RSSM baseline (B1) and a factored `(q, qdot, z_nuisance)` model (B_main) with a learned Lagrangian, Rayleigh dissipation, and a symplectic integrator (plus an `--dynamics-form mlp` control arm). Phase-1 scaffolding (reward head, CEM/MPC for the RSSM, physics-perturbation wrapper, visual distractors, `eval-control`) is in place. After the October 2026 review the project is gated on one decisive experiment (see `docs/current_status.md`); the ablations B2/B3/B4 and the OOD MPC grid wait on that gate. **Do not add actor-critic, replay buffers, zarr, distributed collection, or augmentation pipelines unless a task explicitly asks for them.**
 
+**Research protocol (binding, see `AGENTS.md`):** follow `docs/research_protocol.md`. Keep `docs/hypotheses.md` (registry of hypotheses and assumptions, with falsifying tests) current. Before any run longer than ~1 h, write the prediction and decision rule there and pass the relevant oracle rungs (`scripts/oracles/`, results in `runs/oracles/`). Report metrics with their floor and ceiling. For surprises, list competing explanations and run the cheapest discriminating test first.
+
 Authoritative docs:
 - `docs/research_spec.md` — long-term research direction; do not silently rewrite hypotheses, baselines, or kill criteria.
 - `docs/development.md` — setup, collection, training, evaluation, debugging commands (prefer this over README for day-to-day).

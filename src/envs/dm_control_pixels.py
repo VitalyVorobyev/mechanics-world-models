@@ -157,6 +157,19 @@ class DmControlPixelEnv:
             qvel=physics_state["qvel"],
         )
 
+    def step_without_render(self, action: NDArray[np.floating[Any]]) -> dict[str, NDArray[np.float64]]:
+        """Apply one action for ``action_repeat`` physics steps; return the state, no image.
+
+        For simulator-only diagnostics (e.g. intervention-effect checks)
+        where rendering would dominate the cost.
+        """
+
+        for _ in range(self.config.action_repeat):
+            self._time_step = self._env.step(action)
+            if self._time_step.last():
+                break
+        return self.physics_state()
+
     def physics_state(self) -> dict[str, NDArray[np.float64]]:
         """Return a snapshot of the simulator's generalized state.
 

@@ -555,6 +555,8 @@ def load_mechanics_model_from_checkpoint(
         dynamics_form=str(checkpoint_config.get("dynamics_form", "lagrangian")),
         dissipation_form=str(checkpoint_config.get("dissipation_form", "rayleigh_mlp")),
         mlp_dynamics_hidden_size=int(checkpoint_config.get("mlp_dynamics_hidden_size", 128)),
+        encoder_type=str(checkpoint_config.get("encoder_type", "conv")),
+        decoder_type=str(checkpoint_config.get("decoder_type", "deconv")),
         nuisance_alpha_init=float(
             checkpoint_config.get("nuisance_alpha_init", 0.95),
         ),

@@ -296,6 +296,34 @@ Resume from the latest checkpoint:
   --resume-from checkpoints/rssm-cartpole-random-100k/latest.pt
 ```
 
+## Oracle Diagnostics (run before end-to-end training)
+
+The oracle ladder from [`research_protocol.md`](research_protocol.md). Each
+script tests one component against simulator ground truth and writes
+`runs/oracles/<name>/<timestamp>.json` (plus `latest.json`) with pass/fail
+criteria and the registry IDs it informs.
+
+```bash
+# Rung 0 (~5 s): how far each physics perturbation moves trajectories
+.venv/bin/python scripts/oracles/intervention_effect.py
+# Rung 1 (~30 s on MPS): decoder from the TRUE pose (render | deconv)
+.venv/bin/python scripts/oracles/decoder_oracle.py --kind render
+# Rung 2 (~1 min): encoder regressing the TRUE pose (keypoint | conv)
+.venv/bin/python scripts/oracles/encoder_oracle.py --kind keypoint
+# Rung 3 (~5 min CPU): Lagrangian vs MLP on true state + few-shot adaptation
+.venv/bin/collect-cartpole --output-dir data/cartpole-ood-cartmass20-15k-v2 \
+    --total-frames 15000 --seed 12 --action-repeat 2 --physics-scale body_mass_1=2.0
+.venv/bin/python scripts/oracles/dynamics_oracle.py \
+    --shift cart_mass_x05=data/cartpole-ood-cartmass05-15k-v2 \
+    --shift cart_mass_x2=data/cartpole-ood-cartmass20-15k-v2 --pretrain-steps 10000
+```
+
+The keypoint / renderer front end (`--encoder-type keypoint --decoder-type
+render`, cartpole only) and the extra losses (`--latent-dynamics-weight`,
+`--latent-dynamics-horizon`, `--keypoint-consistency-weight`,
+`--kl-mech-scale`) are described in
+[`models/mechanics_world_model.md`](models/mechanics_world_model.md).
+
 ## Train The Mechanics Model
 
 ### Gate experiment (October 2026, current)
