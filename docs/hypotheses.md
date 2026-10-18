@@ -20,7 +20,7 @@ Last full review: 2026-10-18.
 | ID | Statement (short) | Status |
 |---|---|---|
 | H1a | Mechanics structure improves extrapolation to unseen *states* of the same system | open |
-| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | open: on true state about 1.7× at k = 1–2, parity by k = 5 (v3); matched baseline running (current focus) |
+| H1b | Mechanics structure improves *few-shot adaptation* to changed physical parameters | supported on true state for parameter *extrapolation* (dose-response up to 6× vs a context MLP; parity inside the trained range); pixels not tested (current focus) |
 | H1-zs | Structure alone (no adaptation) degrades more gracefully under parameter shift | refuted as a useful question |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance and helps under visual shift | assumed |
 | H3 | Dissipation matters (conservative-only underperforms on damped systems) | assumed |
@@ -280,6 +280,118 @@ Last full review: 2026-10-18.
     Stop H1b and write up.
   - *Mixed:* add an interpolation control (test masses inside the
     training range) before deciding.
+- **Result (2026-10-18, `runs/oracles/context_oracle/20261018-18*.json`,
+  seeds 0–2):** passes the written rule.
+  - `mlp_ctx_over_lag_ctx_ratio_k1_h20` = 1.61 ± 0.12 and `_k5_h20` =
+    1.70 ± 0.25; every seed ≥ 1.42.
+  - Nominal h20: Lagrangian 0.0091, MLP 0.0080.
+
+    Mean h20 over 3 seeds, one recipe per mode:
+
+    | | k=0 | k=1 lag_ctx / lag_full / mlp_ctx / mlp_full | k=5 | k=20 |
+    |---|---|---|---|---|
+    | ×0.5 | 0.065 | 0.0100 / 0.019 / 0.023 / 0.040 | 0.0102 / 0.012 / 0.022 / 0.021 | 0.0101 / 0.011 / 0.022 / 0.014 |
+    | ×2 | 0.029 | 0.0042 / 0.0066 / 0.0039 / 0.0089 | 0.0035 / 0.0044 / 0.0039 / 0.0042 | 0.0044 / 0.0040 / 0.0038 / 0.0036 |
+
+  - Multi-mass training helped the Lagrangian base: `lag_ctx` on ×0.5 is
+    0.010, against v3's single-mass `lag_low` at 0.017.
+  - Surprise 1: the learned Lagrangian training contexts are not
+    physical. Every non-nominal mass has a positive mass offset and a
+    gain of about 1.6×, whereas the MLP contexts are linear in mass.
+    Candidate causes: weak identifiability of mass vs gain from
+    random-action data; the pinned nominal context plus the shared `M`;
+    a mismatch between the pretraining scale and the calibrated scale.
+    Not yet tested; it did not prevent good adaptation.
+  - Surprise 2, which matters for the claim: the entire advantage is on
+    ×0.5, while ×2 is at parity, even though ×2 is further outside the
+    training range (1.4). A lighter cart reaches faster states than
+    training covered. So the advantage may be **state-space
+    extrapolation** (H1a), not parameter adaptation.
+- **Adversarial checks (predictions written 2026-10-18, before running):**
+  - *Interpolation control:* test cart masses 0.775 and 1.3, inside the
+    training range, simulated. If the mechanism is parameter adaptation,
+    the Lagrangian still wins. If it is state extrapolation, they are at
+    parity. My prediction: parity (ratio < 1.3, about 70% confidence),
+    because ×2 already shows parity.
+  - *Velocity split on ×0.5:* the `mlp_ctx` excess error concentrates in
+    windows whose speeds exceed the 99th percentile of the training data.
+  - *Consequence:* if both hold, the claim becomes "structure helps the
+    model extrapolate to unseen *states* that a parameter change exposes".
+    This is H1a, demonstrated through H1b. That is narrower than "few-shot
+    adaptation" but still testable in pixels, and the paper framing
+    changes accordingly.
+- **Adversarial check results (2026-10-18):**
+  - *Velocity split* (`scripts/oracles/context_velocity_split.py`):
+    prediction **refuted**.
+    - Only 8–12% of ×0.5 test windows exceed the training data's 99th
+      percentile speeds.
+    - Inside the training speeds, `mlp_ctx` is still 2.2–2.6× worse
+      (0.020–0.024 vs 0.0087–0.0092, seeds 0–2). The gap is not a
+      speed-extrapolation artifact.
+  - *Interpolation control* (`runs/oracles/context_oracle/`, shifts
+    `cart_mass_x0.775`, `cart_mass_x1.3`, simulated): prediction
+    **confirmed**.
+    - Parity: ratio 1.04 ± 0.08 at k1 and 1.04 ± 0.01 at k5.
+    - Both adapt to about 0.009 (0.775) and about 0.006 (1.3) from
+      k = 1.
+  - *Reading:* the advantage is **parameter extrapolation**. Inside the
+    trained parameter range a context MLP is as good. Outside it, the
+    Lagrangian slot (exactly linear in mass) keeps working while the MLP
+    context saturates (`mlp_ctx` is flat in k at 0.022 on ×0.5).
+  - The ×0.5 vs ×2 asymmetry fits the dynamics-relevant coordinate
+    1/M₀₀. Training covers 0.67–1.25; ×0.5 lies at 1.67 (0.42 beyond the
+    range) and ×2 at 0.48 (0.19 beyond).
+- **Dose-response test (prediction written 2026-10-18, before running):**
+  - Setup: simulated cart masses ×0.6, ×0.4, ×0.3 (light side) and ×3,
+    ×5 (heavy side). Modes `lag_ctx`, `mlp_ctx`; k ∈ {1, 5}; 3 seeds.
+  - 1/M₀₀ for these masses: 1.43, 2.0, 2.5, 0.32, 0.20, i.e. 0.18, 0.75,
+    1.25, 0.35 and 0.47 beyond the trained range.
+  - Prediction: the per-shift ratio `mlp_ctx / lag_ctx` rises with that
+    distance. Roughly 1 at ×0.6 (0.18), clearly > 1.5 at ×0.4 and ×0.3.
+    The heavy side is above ×2's parity but below the light side at
+    equal distance, because a heavier cart also moves less, so the
+    absolute errors are small.
+  - Refuted if the ratio is flat or non-monotone in the distance.
+- **Dose-response result (2026-10-18, `runs/oracles/context_oracle/`,
+  shifts `cart_mass_x0.6` … `x5`, seeds 0–2):** **confirmed** on the light
+  side; the heavy side sits at the floor.
+
+  | shift | 1/M₀₀ beyond range | ratio k1 | ratio k5 | lag_ctx / mlp_ctx h20 (k1) | zero-shot |
+  |---|---|---|---|---|---|
+  | ×0.6 | 0.18 | 1.18 ± 0.09 | 1.09 ± 0.07 | 0.011 / 0.013 | 0.047 |
+  | ×0.5 (earlier run) | 0.42 | 2.3 | 2.2 | 0.010 / 0.023 | 0.065 |
+  | ×0.4 | 0.75 | 3.1 ± 0.7 | 2.8 ± 0.5 | 0.016 / 0.047 | 0.083 |
+  | ×0.3 | 1.25 | 5.8 ± 0.4 | 5.6 ± 0.4 | 0.015 / 0.087 | 0.129 |
+  | ×3 | 0.35 | 1.2 ± 0.4 | 1.1 ± 0.3 | 0.0036 / 0.0040 | 0.042 |
+  | ×5 | 0.47 | 1.2 ± 0.3 | 1.6 ± 0.2 | 0.0032 / 0.0037 | 0.052 |
+
+  - Light side: monotone in distance in every seed. At ×0.3 one 50-frame
+    segment cuts the Lagrangian error 8.5× (0.129 → 0.015), while the
+    context MLP stays at 0.087.
+  - Heavy side: both forms adapt to *below* the nominal error (a heavy
+    cart moves slowly), so they are at the floor and cannot discriminate.
+    That is consistent with the prediction, but weak evidence.
+- **H1b on true state (summary):**
+  - With a physically identified Lagrangian (`actuated_dims=(0,)`), a
+    3-number adaptation of the mass/gain slots extrapolates to cart masses
+    outside the trained range.
+  - Its advantage over a context-conditioned MLP trained on the same
+    masses grows with the extrapolation distance, from parity inside the
+    range to about 6× at 1/M₀₀ 1.25 beyond it.
+  - The single-environment version gives about 1.7× at k = 1–2.
+  - Caveats:
+    - one system (cartpole) and one parameter (cart mass);
+    - true state;
+    - the prerequisite margin is borderline (nominal error about 0.3 of
+      the ×0.5 effect);
+    - the learned training contexts of the Lagrangian are not physical
+      (Surprise 1, untested).
+  - **Next per the decision rule:** the pixel version, starting with
+    A-FE-1 (front end). A cheaper intermediate is noisy state (simulated
+    keypoint noise at the level the encoder oracle achieves): does the
+    advantage survive pose noise? Then a second parameter (actuator gear,
+    or gravity via the potential) to show it is not specific to the mass
+    slot.
 
 ### H1-zs — zero-shot graceful degradation
 - **Status:** refuted as a useful question.

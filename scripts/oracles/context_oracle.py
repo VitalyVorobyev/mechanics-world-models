@@ -19,7 +19,7 @@ from pathlib import Path
 
 import torch
 
-from oracles.common import load_shift_splits, load_state_episodes
+from oracles.common import StateEpisodes, load_shift_splits, load_state_episodes
 from oracles.context import CONTEXT_MODES, run_context_oracle, simulate_state_episodes
 
 
@@ -28,6 +28,10 @@ def main() -> None:
     parser.add_argument("--nominal", type=Path, default=Path("data/cartpole-swingup-random-100k-v2"))
     parser.add_argument(
         "--shift", action="append", default=None, help="NAME=DATASET_DIR (default: cart mass x0.5 and x2)",
+    )
+    parser.add_argument(
+        "--sim-shift", action="append", default=None,
+        help="NAME=CART_MASS_SCALE: simulate a test shift (30 episodes split 15/7/8) instead of datasets",
     )
     parser.add_argument("--train-masses", type=float, nargs="+", default=[1.0, 0.7, 0.85, 1.2, 1.4])
     parser.add_argument("--episodes-per-mass", type=int, default=30)
@@ -54,9 +58,18 @@ def main() -> None:
     }
     nominal_val = load_state_episodes(args.nominal, split="val", seed=args.seed)
     shifted = {}
-    for item in shift_items:
-        name, _, directory = item.partition("=")
-        shifted[name] = load_shift_splits(Path(directory), seed=args.seed)
+    if args.sim_shift:
+        for index, item in enumerate(args.sim_shift):
+            name, _, scale = item.partition("=")
+            sim = simulate_state_episodes({"body_mass_1": float(scale)}, episodes=30, seed=1000 * args.seed + 500 + index)
+            shifted[name] = tuple(
+                StateEpisodes(qpos=sim.qpos[part], qvel=sim.qvel[part], actions=sim.actions[part], frame_dt=sim.frame_dt)
+                for part in (slice(0, 15), slice(15, 22), slice(22, 30))
+            )
+    else:
+        for item in shift_items:
+            name, _, directory = item.partition("=")
+            shifted[name] = load_shift_splits(Path(directory), seed=args.seed)
     result = run_context_oracle(
         train_envs, nominal_val, shifted, ks=args.ks, pretrain_steps=args.pretrain_steps, seed=args.seed,
         modes=args.modes, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),

@@ -1,6 +1,35 @@
 # Current Status and Open Problem
 
-## Latest (2026-10-18, evening): pivot to few-shot adaptation, protocol adopted
+## Latest (2026-10-18, night): H1b supported on true state, for parameter extrapolation
+
+Details, predictions and tables are in
+[`hypotheses.md`](hypotheses.md#h1b--few-shot-adaptation-current-focus).
+
+- **Rail contacts confounded v1.** About 30% of 20-step windows in
+  random-policy data reach the ±1.8 m slider limit, a stiff
+  non-Lagrangian constraint. Even the true smooth dynamics err there.
+  The oracles now use rail-free windows; there, the cart-mass effect is
+  25–40× the ceiling error.
+- **Gauge (A-ACT-1).** With an unconstrained actuation `B(q)`, the
+  learned `M` is not physical (M11 inflated 71–80×), because `B` absorbs
+  the cart-pole coupling. `Actuation(actuated_dims=(0,))` fixes it:
+  the learned `M` matches the true `M` up to scale, with residual 0.047.
+- **Few-shot adaptation on true state:**
+  - Single mass, 3-parameter physical slot against MLP fine-tuning:
+    about 1.7× lower h20 error at k = 1–2 segments, parity by k = 5.
+  - Matched baseline: a context-conditioned MLP trained on the same five
+    masses. Inside the trained mass range the two are at parity. Outside
+    it, the Lagrangian's advantage grows with the extrapolation distance
+    (cart mass ×0.6: 1.2×; ×0.5: 2.3×; ×0.4: 3.1×; ×0.3: 5.8×), and it
+    holds at speeds seen in training.
+  - The claim is narrower than "structure helps adaptation": **a
+    physically identified Lagrangian lets a 3-number adaptation
+    extrapolate in parameter space**.
+- **Next:** robustness to pose noise at the encoder-oracle level (a cheap
+  intermediate), a second parameter, then the pixel version (A-FE-1
+  first).
+
+## Earlier (2026-10-18, evening): pivot to few-shot adaptation, protocol adopted
 
 - **The gate run was stopped** at step 3967 (resumable). A targeted
   literature check and our own oracles showed it would test answered
