@@ -184,6 +184,14 @@ def _pose(q: torch.Tensor) -> torch.Tensor:
 Windows = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 
+def pose_loss(pred: torch.Tensor, target: torch.Tensor, huber_delta: float | None = None) -> torch.Tensor:
+    """Mean squared error, or ``2 × Huber`` (equal to MSE for errors below ``huber_delta``)."""
+
+    if huber_delta is None:
+        return (pred - target).square().mean()
+    return 2.0 * nn.functional.huber_loss(pred, target, delta=huber_delta)
+
+
 def _windows(
     episodes: StateEpisodes,
     horizon: int,
@@ -235,11 +243,13 @@ def fit(
     cosine: bool = False,
     checkpoints: Sequence[int] = (),
     on_checkpoint: Callable[[int], None] | None = None,
+    huber_delta: float | None = None,
 ) -> float:
     """Multi-step rollout regression on pose features; returns the final batch loss.
 
     ``on_checkpoint(step)`` is called after each step count in ``checkpoints``
-    (``0`` = before any update).
+    (``0`` = before any update). ``huber_delta`` switches the squared error to
+    a Huber loss (robust to windows ruined by bad start velocities).
     """
 
     q0, v0, act, tgt = data
@@ -254,7 +264,7 @@ def fit(
     for step in range(1, steps + 1):
         idx = torch.randint(0, q0.shape[0], (min(batch_size, q0.shape[0]),), generator=generator)
         pred = model.rollout(q0[idx], v0[idx], act[idx])
-        loss = (_pose(pred) - target_pose[idx]).square().mean()
+        loss = pose_loss(_pose(pred), target_pose[idx], huber_delta)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         nn.utils.clip_grad_norm_(parameters, 10.0)

@@ -49,6 +49,7 @@ from oracles.dynamics import (
     _pose,
     _subset,
     _windows,
+    pose_loss,
     free_segments,
     windows_error,
 )
@@ -228,6 +229,7 @@ def _multi_env_windows(
 
 def pretrain(
     model: ContextDynamics, data, *, steps: int, lr: float, batch_size: int, seed: int,
+    huber_delta: float | None = None,
 ) -> float:
     q0, v0, act, tgt, env = data
     generator = torch.Generator().manual_seed(seed)
@@ -239,7 +241,7 @@ def pretrain(
     for _ in range(steps):
         idx = torch.randint(0, q0.shape[0], (batch_size,), generator=generator)
         pred = model.rollout(q0[idx], v0[idx], act[idx], env[idx])
-        loss = (_pose(pred) - target[idx]).square().mean()
+        loss = pose_loss(_pose(pred), target[idx], huber_delta)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         nn.utils.clip_grad_norm_(parameters, 10.0)
@@ -250,7 +252,7 @@ def pretrain(
 
 def _adapt_grid(
     base, mode, data, select, test, *, lrs, checkpoints, horizons, select_horizon, batch_size, seed,
-    test_noisy=None,
+    test_noisy=None, huber_delta=None,
 ):
     from oracles.dynamics import fit
 
@@ -272,6 +274,7 @@ def _adapt_grid(
         fit(
             view, data, adapted.adaptation_parameters(mode), steps=max(checkpoints), lr=lr,
             batch_size=batch_size, seed=seed, checkpoints=checkpoints, on_checkpoint=record,
+            huber_delta=huber_delta,
         )
     return grid
 
@@ -292,7 +295,7 @@ def _true_rollout(accel: TrueAcceleration, frame_dt: float):
 def _start_state_eval(
     models, per_shift, recipes, metrics, cache, *, observe, ks, modes, segment_length, train_horizon,
     rail_margin, eval_horizons, eval_stride, batch_size, seed, start_context, pose_noise, shift_scales,
-    frame_dt, log,
+    frame_dt, log, huber_delta=None,
 ) -> None:
     """Re-adapt each selected recipe (deterministic) and score start-state estimators."""
 
@@ -331,7 +334,7 @@ def _start_state_eval(
                     if int(steps) > 0:
                         fit(
                             _Adapted(adapted), adapt_data, adapted.adaptation_parameters(mode), steps=int(steps),
-                            lr=float(lr), batch_size=batch_size, seed=seed + k,
+                            lr=float(lr), batch_size=batch_size, seed=seed + k, huber_delta=huber_delta,
                         )
                     cache.save_cell(
                         key, evaluate_starts(_torch_rollout(adapted), windows, horizons, sigma=sigma),
@@ -379,6 +382,7 @@ def run_context_oracle(
     pose_source: str | None = None,
     potential_slot: bool = False,
     pose_outliers: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    huber_delta: float | None = None,
     cache_dir: Path | None = None,
     log=print,
 ) -> OracleResult:
@@ -430,6 +434,9 @@ def run_context_oracle(
         "train_envs", "train_episodes", "train_horizon", "pretrain_steps", "batch_size", "lr", "n_substeps",
         "rail_margin", "actuated_dims", "seed", "frame_dt",
     )
+    if huber_delta is not None:  # only then, so earlier caches keep their hashes
+        config["huber_delta"] = huber_delta
+        pretrain_keys += ("huber_delta",)
     if potential_slot:  # only then, so earlier caches keep their hashes
         config["potential_slot"] = True
         pretrain_keys += ("potential_slot",)
@@ -471,7 +478,9 @@ def run_context_oracle(
         if cache.load_model(form, model):
             log(f"pretrained {form}: loaded from cache")
         else:
-            final = pretrain(model, data, steps=pretrain_steps, lr=lr, batch_size=batch_size, seed=seed)
+            final = pretrain(
+                model, data, steps=pretrain_steps, lr=lr, batch_size=batch_size, seed=seed, huber_delta=huber_delta,
+            )
             cache.save_model(form, model)
             log(f"pretrained {form}: final loss {final:.2e} ({time.time() - start:.0f}s)")
         model.calibrate_slots(data[0][data[4] == 0])
@@ -538,7 +547,7 @@ def run_context_oracle(
                 grid = _adapt_grid(
                     models[form], mode, adapt_data, select, test, lrs=adapt_lrs, checkpoints=adapt_checkpoints,
                     horizons=eval_horizons, select_horizon=select_horizon, batch_size=batch_size, seed=seed + k,
-                    test_noisy=test_noisy,
+                    test_noisy=test_noisy, huber_delta=huber_delta,
                 )
                 cache.save_cell(key, grid)
                 best = min(grid.values(), key=lambda g: g["select"])
@@ -569,7 +578,7 @@ def run_context_oracle(
             segment_length=segment_length, train_horizon=train_horizon, rail_margin=rail_margin,
             eval_horizons=eval_horizons, eval_stride=eval_stride, batch_size=batch_size, seed=seed,
             start_context=start_context, pose_noise=pose_noise, shift_scales=shift_scales,
-            frame_dt=nominal_val.frame_dt, log=log,
+            frame_dt=nominal_val.frame_dt, log=log, huber_delta=huber_delta,
         )
     criteria = []
     for k in [k for k in (1, 5) if k in ks]:

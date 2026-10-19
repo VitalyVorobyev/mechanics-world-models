@@ -454,3 +454,14 @@ def test_evaluate_starts_handles_no_windows() -> None:
         start_qdot=np.zeros((0, 2)), target=np.zeros((0, 20, 2)), context=8, frame_dt=0.02,
     )
     assert np.isnan(evaluate_starts(_particle_rollout, empty, (20,), sigma=(0.01, 0.01))["shoot.dev_h20"])
+
+
+def test_pose_loss_huber_matches_mse_for_small_errors() -> None:
+    import torch
+
+    from oracles.dynamics import pose_loss
+
+    pred, target = torch.tensor([0.001, 0.5]), torch.zeros(2)
+    small = pose_loss(pred[:1], target[:1], 0.02)
+    assert torch.isclose(small, pose_loss(pred[:1], target[:1]))
+    assert pose_loss(pred, target, 0.02) < 0.1 * pose_loss(pred, target)  # the outlier is capped

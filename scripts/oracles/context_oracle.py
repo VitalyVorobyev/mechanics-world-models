@@ -98,6 +98,10 @@ def main() -> None:
         "--pose-outliers", type=float, nargs=3, default=[0.0, 0.0, 0.0], metavar=("FRACTION", "SIGMA_X_M", "SIGMA_THETA_DEG"),
         help="with --pose-noise: add heavy errors to this fraction of frames",
     )
+    parser.add_argument(
+        "--huber-delta", type=float, default=None,
+        help="Huber instead of squared pose error in pretraining and adaptation (robust to bad windows)",
+    )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
     args = parser.parse_args()
@@ -176,7 +180,7 @@ def main() -> None:
         train_velocity=args.train_velocity, pose_source=pose_source,
         potential_slot=args.potential_slot,
         pose_outliers=(args.pose_outliers[0], args.pose_outliers[1], math.radians(args.pose_outliers[2])),
-        cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
+        huber_delta=args.huber_delta, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
     path = result.write()
     print(result.summary())

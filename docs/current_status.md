@@ -67,9 +67,13 @@ Details, predictions written before each run, and tables are in
   - a model-based start state over at least 8 frames;
   - in-view frames only;
   - a slot for every parameter that is meant to shift.
+- **Robust loss:** a Huber loss fully fixes synthetic, independent
+  outliers (ratio 2.6 with outliers, against 0.86 with MSE). It does not
+  fix the real heuristic front end (0.6), whose bad frames come in
+  runs. So frame rejection stays in the pipeline, with Huber on top.
 - **Next:**
-  - make the Lagrangian itself robust (bounded velocity features in the
-    Coriolis term, or a Huber loss) instead of rejecting frames;
+  - measure how the heuristic's large errors cluster in time, and decide
+    between rejection and a front end that flags its own failures;
   - then an explicit observation-noise model (a filtering posterior),
     and only then end-to-end pixel training with a render-and-compare
     front end.

@@ -876,6 +876,48 @@ Last full review: 2026-10-18.
     (θ median 1.24°, rms 1.9°, about 0.55–0.8 px at the tip), the regime
     where Gaussian noise also leaves about 1.5× at best.
 
+- **Robust loss instead of frame rejection (prediction written
+  2026-10-19, before running):**
+  - Change: a Huber loss (δ = 0.02 in pose features, scaled to equal the
+    MSE below δ) in pretraining and adaptation (`--huber-delta 0.02`).
+    The model is unchanged. `shoot` stays least squares.
+  - Runs, seeds 0–2, `shoot` with 8 frames:
+    - (a) the synthetic heavy-tail setting (0.08 px plus 2% outliers;
+      with MSE: Lagrangian nominal 0.075, ratio 0.86);
+    - (b) the heuristic front end *without* rejection (with MSE: 0.54;
+      with rejection: 1.16).
+  - Prediction:
+    - (a) the Lagrangian's nominal error returns to ≤ 0.025 and the
+      true-start ratio to ≥ 1.3 (about 60%).
+    - (b) the Lagrangian's nominal error is ≤ 0.04, but the `shoot` ratio
+      stays below 1.3 (about 65%). The least-squares start-state fit still
+      sees the outliers in its context frames, which rejection removed.
+  - Decision rule:
+    - *Huber matches rejection on training:* use the robust loss
+      (simpler, keeps every frame), and make `shoot` robust too.
+    - *It does not:* keep frame rejection as part of the pipeline.
+- **Robust-loss result (2026-10-19, seeds 0–2):**
+  - (a) Synthetic heavy tails: **confirmed, strongly.**
+    - Nominal h20: Lagrangian 0.015–0.017 (0.075 with MSE, 0.014 without
+      outliers); MLP 0.019–0.021.
+    - Ratios: true start 3.3 ± 0.7, `shoot` 2.6 ± 0.5 (k1), even above the
+      no-outlier run (2.15 / 1.91).
+    - With independent outliers, a Huber loss fully restores the
+      structured model.
+  - (b) Heuristic front end without rejection: Lagrangian NaN (seed 0) or
+    0.059–0.061 nominal, MLP 0.055. Ratios 0.52–0.65 (true start) and
+    0.57–0.65 (`shoot`). The nominal prediction (≤ 0.04) is refuted; the
+    ratio prediction (< 1.3) is confirmed.
+  - Reading: the real front end's bad frames are not isolated spikes.
+    Huber handles independent outliers but not this. The likely culprits
+    are sustained runs of wrong frames, where the pole is clipped,
+    crosses the cart band, or the heuristic misfires on consecutive
+    frames. Rejecting a frame together with its neighbours removes those
+    (nominal 0.030).
+  - **Decision (written rule): keep frame rejection in the pipeline.**
+    Add Huber on top for independent outliers. Next diagnostic: measure
+    the run-length distribution of the heuristic's large errors.
+
 - **Second parameter, actuator gear (prediction written 2026-10-18,
   before running):**
   - Setup: as the context oracle, but the five training environments vary
