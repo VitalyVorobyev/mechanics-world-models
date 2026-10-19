@@ -330,6 +330,26 @@ of `src/oracles/` and `src/models/mechanics/`. Caches written before
 2026-10-19 used the config hash alone; `export_demo.py` still falls back
 to them.
 
+## Closed-Loop Control (E-006 onward)
+
+`src/control/` holds the swing-up reward in closed form (`reward.py`,
+verified equal to dm_control's), a backend-agnostic MPPI planner
+(`mppi.py`) and the true-model backend (`true_model.py`, batched
+`mujoco.rollout`). One run of `scripts/oracles/control_episode.py` is one
+evaluation episode; it writes a ledgered `OracleResult` plus the trajectory
+(`.npz` next to the JSON).
+
+```bash
+# planner on the true model (about 20-60 s per episode on 4 threads)
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics true --seed 0 \
+    --horizon 50 --samples 512 --noise-std 0.5 --temperature 1.0
+# floors
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics zero --seed 0
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics random --seed 0
+# table (mean ± sample std over seeds, grouped by config)
+.venv/bin/python scripts/research/report.py E-006
+```
+
 ## Oracle Diagnostics (run before end-to-end training)
 
 The oracle ladder from [`research_protocol.md`](research_protocol.md). Each

@@ -188,6 +188,23 @@ class DmControlPixelEnv:
                 break
         return self.physics_state()
 
+    def step_state(self, action: NDArray[np.floating[Any]]) -> tuple[dict[str, NDArray[np.float64]], float]:
+        """Like ``step_without_render`` but also return the reward summed over ``action_repeat``."""
+
+        reward = 0.0
+        for _ in range(self.config.action_repeat):
+            self._time_step = self._env.step(action)
+            reward += float(self._time_step.reward or 0.0)
+            if self._time_step.last():
+                break
+        return self.physics_state(), reward
+
+    @property
+    def physics(self) -> Any:
+        """The underlying dm_control ``Physics`` (``.model.ptr`` / ``.data.ptr`` are MuJoCo structs)."""
+
+        return self._env.physics
+
     def physics_state(self) -> dict[str, NDArray[np.float64]]:
         """Return a snapshot of the simulator's generalized state.
 
