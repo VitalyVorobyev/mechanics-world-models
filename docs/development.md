@@ -342,6 +342,9 @@ pretrained models.
 # trained on simulated cart masses {1, 0.7, 0.85, 1.2, 1.4}, tested on x0.5 / x2
 .venv/bin/python -u scripts/oracles/context_oracle.py --seed 0 \
     >> runs/oracles/logs/context_seed0.log 2>&1
+# Animated web demo data (no training): reload the cached seed-0 mass / gravity runs,
+# redo the one-clip adaptation, export 2 s rollouts and a rendered front-end episode
+.venv/bin/python scripts/oracles/export_demo.py --out runs/demo
 # Same, seeds 0-2 in parallel with named logs; extra flags pass through
 TAG=context_dose scripts/oracles/run_context.sh \
     --sim-shift cart_mass_x0.4=0.4 --sim-shift cart_mass_x0.3=0.3 --ks 1 5 --modes lag_ctx mlp_ctx
