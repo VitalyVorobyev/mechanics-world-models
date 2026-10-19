@@ -30,7 +30,7 @@ import torch
 from control.learned import (
     LearnedBackend, TrainConfig, concat_states, episodes_to_states, run_episode, train_model, true_state,
 )
-from control.mppi import MPPI, MPPIConfig
+from control.mppi import E006_PLANNER, MPPI
 from oracles.common import Criterion, OracleResult, StateEpisodes
 from oracles.context import simulate_state_episodes
 from oracles.dynamics import DynamicsWrapper, _cache_key
@@ -38,8 +38,6 @@ from research.provenance import add_run_args, begin_run
 from research.report import parse_seeds
 
 NAME = "learned_control"
-# Frozen in E-006 (docs/experiments/E-006-planner-ceiling.md).
-E006_PLANNER = MPPIConfig(horizon=75, samples=512, noise_std=0.5, temperature=1.0)
 
 
 def _save_states(path: Path, data: StateEpisodes) -> None:

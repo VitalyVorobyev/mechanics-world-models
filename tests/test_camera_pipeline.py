@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from control.camera import FULL_VIEW, CameraSpec, render_states
-from control.estimator import FixedLagEstimator, integrate
+from control.estimator import FixedLagEstimator, integrate, learned_dynamics, mujoco_dynamics
 from control.keypoints import pose_error_metrics, read_poses, sample_states, train_reader
 from oracles.dynamics import DynamicsWrapper
 
@@ -53,10 +53,26 @@ def test_estimator_recovers_velocity_of_its_own_model() -> None:
     model = DynamicsWrapper("mlp", dt=0.02, n_substeps=2).eval()
     actions = np.random.default_rng(0).uniform(-1, 1, size=(40, 1))
     q, qdot = np.array([[0.0, 3.0]]), np.array([[0.3, -1.0]])
-    estimator = FixedLagEstimator(model, window=10)
+    estimator = FixedLagEstimator(learned_dynamics(model), window=10)
     for k in range(40):
         if k:
             q, qdot = integrate(model, q, qdot, actions[k - 1][None, None])
         state = estimator.update(q[0], actions[k - 1] if k else None)
     assert estimator.rejected == 0
     assert np.abs(state[1] - qdot[0]).max() < 0.05
+
+
+def test_mujoco_dynamics_matches_env() -> None:
+    from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
+
+    env = DmControlPixelEnv(PixelEnvConfig(seed=2, action_repeat=2))
+    env.reset_without_render()
+    start = env.physics_state()
+    dynamics = mujoco_dynamics(env.physics.model.ptr, action_repeat=2)
+    actions = np.random.default_rng(3).uniform(-1, 1, size=(1, 15, 1))
+    poses = dynamics.rollout(start["qpos"][None], start["qvel"][None], actions)
+    q_end, v_end = dynamics.integrate(start["qpos"][None], start["qvel"][None], actions)
+    for k in range(15):
+        state, _ = env.step_state(actions[0, k])
+        assert np.allclose(poses[0, k], state["qpos"], atol=1e-9)
+    assert np.allclose(q_end[0], state["qpos"]) and np.allclose(v_end[0], state["qvel"])

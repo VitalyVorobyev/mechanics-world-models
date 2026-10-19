@@ -15,7 +15,13 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Source trees whose edits can change an oracle's numbers (cache keys and records include their hash).
-ORACLE_SOURCE_DIRS = (REPO_ROOT / "src" / "oracles", REPO_ROOT / "src" / "models" / "mechanics")
+# Code whose changes invalidate cached models, data and evaluations (``source_fingerprint``).
+ORACLE_SOURCE_DIRS = (
+    REPO_ROOT / "src" / "oracles",
+    REPO_ROOT / "src" / "models" / "mechanics",
+    REPO_ROOT / "src" / "control",
+    REPO_ROOT / "src" / "envs",
+)
 _VERSIONED_PACKAGES = ("torch", "numpy", "mujoco", "dm-control")
 
 

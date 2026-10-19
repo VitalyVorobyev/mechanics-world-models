@@ -168,3 +168,20 @@ def train_model(form: str, data: StateEpisodes, config: TrainConfig, seed: int) 
         seed=seed, cosine=True,
     )
     return model, loss
+
+
+def load_round_model(round_dir) -> DynamicsWrapper:
+    """The model a ``learned_control.py`` round trained (``<cache>/<key>/round<r>/model.pt``)."""
+
+    import json
+    from pathlib import Path
+
+    round_dir = Path(round_dir)
+    config = json.loads((round_dir.parent / "config.json").read_text())
+    train = config["train"]
+    model = DynamicsWrapper(
+        config["form"], hidden=train["hidden"], dt=0.02, n_substeps=train["n_substeps"],
+        actuated_dims=(0,) if config["form"] == "lagrangian" else None,
+    )
+    model.load_state_dict(torch.load(round_dir / "model.pt"))
+    return model.eval()

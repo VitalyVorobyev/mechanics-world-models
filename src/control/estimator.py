@@ -1,7 +1,7 @@
 """Causal state estimation from camera poses through a dynamics model (E-008).
 
 A single frame gives the pose ``(x, θ)`` but no velocity. ``FixedLagEstimator``
-keeps the last ``window + 1`` observed poses and executed actions, fits the
+works with any ``Dynamics`` (a learned model, or the true MuJoCo model) and keeps the last ``window + 1`` observed poses and executed actions, fits the
 state at the start of the window by Levenberg–Marquardt shooting through the
 model (``oracles.start_state.shoot``), and integrates that state forward to
 the current frame. Observations that disagree with the model's one-step
@@ -15,6 +15,8 @@ wrong, and locking out the camera would make that permanent.
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 import torch
@@ -39,6 +41,45 @@ def integrate(
     return q_t.double().numpy(), v_t.double().numpy()
 
 
+@dataclass
+class Dynamics:
+    """What the estimator needs from a model: a pose rollout and a state integrator."""
+
+    rollout: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray]   # q0, v0 [N,2], actions [N,H,A] -> q [N,H,2]
+    integrate: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]  # -> final (q, q̇)
+    dt: float
+
+
+def learned_dynamics(model: DynamicsWrapper) -> Dynamics:
+    return Dynamics(model_rollout(model), lambda q, v, a: integrate(model, q, v, a), model.dt)
+
+
+def mujoco_dynamics(mj_model, action_repeat: int = 2, nthread: int = 1) -> Dynamics:
+    """The true model behind the same interface (rail and contacts included)."""
+
+    import mujoco
+    import mujoco.rollout
+
+    datas = [mujoco.MjData(mj_model) for _ in range(nthread)]
+    roller = mujoco.rollout.Rollout(nthread=nthread)
+    nq = mj_model.nq
+
+    def states(q0: np.ndarray, v0: np.ndarray, actions: np.ndarray) -> np.ndarray:
+        initial = np.concatenate([np.zeros((q0.shape[0], 1)), q0, v0], axis=1)
+        control = np.repeat(actions, action_repeat, axis=1)
+        out, _ = roller.rollout(mj_model, datas, initial, control)
+        return out[:, action_repeat - 1 :: action_repeat]           # [N, H, nstate] at frame ends
+
+    def rollout(q0, v0, actions):
+        return states(q0, v0, actions)[..., 1 : 1 + nq]
+
+    def integrate_true(q0, v0, actions):
+        last = states(q0, v0, actions)[:, -1]
+        return last[:, 1 : 1 + nq], last[:, 1 + nq : 1 + 2 * nq]
+
+    return Dynamics(rollout, integrate_true, mj_model.opt.timestep * action_repeat)
+
+
 def model_rollout(model: DynamicsWrapper):
     """``shoot``'s rollout interface: ``q0, qdot0 [N, 2]``, ``actions [N, H, A]`` -> ``q [N, H, 2]``."""
 
@@ -53,7 +94,7 @@ def model_rollout(model: DynamicsWrapper):
 class FixedLagEstimator:
     def __init__(
         self,
-        model: DynamicsWrapper,
+        dynamics: Dynamics,
         *,
         window: int = 12,
         sigma: tuple[float, float] = (0.02, 0.03),
@@ -61,13 +102,12 @@ class FixedLagEstimator:
         iterations: int = 8,
         max_rejects: int = 2,
     ) -> None:
-        self.model = model
+        self.dynamics = dynamics
         self.window = window
         self.sigma = sigma
         self.gate = np.asarray(gate)
         self.iterations = iterations
         self.max_rejects = max_rejects
-        self._rollout = model_rollout(model)
         self.reset()
 
     def reset(self) -> None:
@@ -89,7 +129,7 @@ class FixedLagEstimator:
             pose[1] = previous[1] + np.angle(np.exp(1j * (pose[1] - previous[1])))
         gate_on = len(self.poses) == self.window + 1 and self._in_a_row < self.max_rejects
         if gate_on and self.state is not None and last_action is not None:
-            q_pred, _ = integrate(self.model, self.state[0][None], self.state[1][None], np.asarray(last_action)[None, None])
+            q_pred, _ = self.dynamics.integrate(self.state[0][None], self.state[1][None], np.asarray(last_action)[None, None])
             q_pred = q_pred[0]
             pose[1] = q_pred[1] + np.angle(np.exp(1j * (pose[1] - q_pred[1])))
             if np.any(np.abs(pose - q_pred) > self.gate):
@@ -104,16 +144,16 @@ class FixedLagEstimator:
 
         observed = np.stack(self.poses)
         if len(self.poses) < 3:
-            qdot = np.zeros(2) if len(self.poses) == 1 else (observed[-1] - observed[-2]) / self.model.dt
+            qdot = np.zeros(2) if len(self.poses) == 1 else (observed[-1] - observed[-2]) / self.dynamics.dt
             self.state = (observed[-1], qdot)
             return self.state
         context = len(self.poses) - 1
         actions = np.stack(list(self.actions)[-context:])
         windows = ContextWindows(
             observed=observed[None], actions=actions[None], start_q=observed[:1], start_qdot=np.zeros((1, 2)),
-            target=np.zeros((1, 0, 2)), context=context, frame_dt=self.model.dt,
+            target=np.zeros((1, 0, 2)), context=context, frame_dt=self.dynamics.dt,
         )
-        start = shoot(self._rollout, windows, sigma=self.sigma, iterations=self.iterations)
-        q, qdot = integrate(self.model, start[:, :2], start[:, 2:], actions[None])
+        start = shoot(self.dynamics.rollout, windows, sigma=self.sigma, iterations=self.iterations)
+        q, qdot = self.dynamics.integrate(start[:, :2], start[:, 2:], actions[None])
         self.state = (q[0], qdot[0])
         return self.state

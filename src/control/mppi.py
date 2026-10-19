@@ -75,3 +75,7 @@ class MPPI:
         action = self.mean[0].copy()
         self.mean = np.concatenate([self.mean[1:], self.mean[-1:]], axis=0)
         return action
+
+
+# Frozen by E-006 (docs/experiments/E-006-planner-ceiling.md); reused unchanged by every later arm.
+E006_PLANNER = MPPIConfig(horizon=75, samples=512, noise_std=0.5, temperature=1.0)
