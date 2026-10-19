@@ -28,7 +28,7 @@ date 2026-11-02.
 | E-008 | Q3 | Keypoints + estimator in the loop; camera-learned model | done: ratio 0.977 (C-017, C-018) |
 | E-001…E-005 | — | Known-model plan | abandoned (never run) |
 
-Compute used today: about 20 CPU process-hours and 0.2 MPS-hours.
+Compute used today: about 18 CPU process-hours (E-007 ≈ 8.5 of 8 budgeted, E-008 ≈ 9.5 of 8: both within the 150% limit) and 0.2 MPS-hours.
 
 ## Waiting on the owner
 1. The stop-date decision (D-1) can be taken early: Q0 holds for cartpole.
