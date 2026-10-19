@@ -1,4 +1,4 @@
-"""Closed-loop cartpole swing-up episodes with an MPPI planner (E-006 onward).
+"""Closed-loop cartpole swing-up episodes with an MPPI planner (E-006, E-009).
 
 One run = one evaluation episode (``--seed`` sets the environment's initial
 state and the planner noise). The result records the env's own return,
@@ -7,6 +7,7 @@ planning cost and rail use; the trajectory is saved next to it for demos.
 Usage:
   .venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics true --seed 0
   .venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics zero --seed 0
+  .venv/bin/python scripts/oracles/control_episode.py --experiment E-009 --task two_poles --dynamics true --seed 0
 
 Writes runs/oracles/control_episode/<timestamp>.json (true model: about 20-60 s per episode).
 """
@@ -19,16 +20,24 @@ import time
 import numpy as np
 
 from control.mppi import MPPI, MPPIConfig
+from control.reward import upright_all
 from control.true_model import MujocoBackend, get_state
 from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
 from oracles.common import Criterion, OracleResult
 from research.provenance import add_run_args, begin_run
 
 NAME = "control_episode"
+# Per task: hypotheses, the return the record's criterion asks for, and its reason.
+TASKS = {
+    "swingup": (["H-PLAN"], 800.0, "E-006: planner ceiling at the level of published agents"),
+    "two_poles": (["H-PLAN-2P"], 600.0, "E-009: a usable ceiling for the two-pole comparison"),
+    "three_poles": ([], 0.0, "exploratory"),
+}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--task", choices=list(TASKS), default="swingup", help="dm_control cartpole task")
     parser.add_argument("--dynamics", choices=["true", "zero", "random"], required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--action-repeat", type=int, default=2)
@@ -45,7 +54,8 @@ def main() -> None:
     args = parser.parse_args()
     run = begin_run(args)
 
-    env = DmControlPixelEnv(PixelEnvConfig(env_name="cartpole-swingup", seed=args.seed, action_repeat=args.action_repeat))
+    env_name = f"cartpole-{args.task}"
+    env = DmControlPixelEnv(PixelEnvConfig(env_name=env_name, seed=args.seed, action_repeat=args.action_repeat))
     env.reset_without_render()
     physics = env.physics
     mppi_config = MPPIConfig(
@@ -70,30 +80,31 @@ def main() -> None:
         qpos.append(state["qpos"]), qvel.append(state["qvel"]), actions.append(action), rewards.append(reward)
 
     qpos_a, qvel_a = np.asarray(qpos), np.asarray(qvel)
-    cos_theta = np.cos(qpos_a[1:, 1])
-    second_half = cos_theta[len(cos_theta) // 2:]
+    upright = upright_all(qpos_a[1:, 1:])
+    second_half = upright[len(upright) // 2:]
     metrics = {
         "return_mean": float(np.sum(rewards)),
         "decisions": len(actions),
         "decision_time_mean_s": float(np.mean(plan_times)),
-        "upright_fraction_second_half": float(np.mean(second_half > 0.95)),
+        "upright_fraction_second_half": float(np.mean(second_half)),
         "max_abs_x": float(np.max(np.abs(qpos_a[:, 0]))),
         "rail_fraction": float(np.mean(np.abs(qpos_a[:, 0]) > 1.75)),
     }
     config = {
-        "env": "cartpole-swingup",
+        "env": env_name,
         "dynamics": args.dynamics,
         "seed": args.seed,
         "action_repeat": args.action_repeat,
         "mppi": mppi_config.to_dict() if args.dynamics == "true" else None,
     }
+    hypotheses, threshold, reason = TASKS[args.task]
     result = OracleResult(
         name=NAME,
-        hypotheses=["H-PLAN"],
+        hypotheses=hypotheses,
         question="Closed-loop swing-up return of an MPPI planner over the given dynamics backend",
         config=config,
         metrics=metrics,
-        criteria=[Criterion("return_mean", ">=", 800.0, "E-006: planner ceiling at the level of published agents")],
+        criteria=[Criterion("return_mean", ">=", threshold, reason)],
     )
     path = result.write(run=run)
     traj = path.with_suffix(".npz")

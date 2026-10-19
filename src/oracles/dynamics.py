@@ -84,26 +84,29 @@ class DynamicsWrapper(nn.Module):
         dt: float = 0.02,
         n_substeps: int = 1,
         actuated_dims: Sequence[int] | None = None,
+        q_dim: int = 2,
+        angle_dims: Sequence[int] = (1,),
     ) -> None:
         super().__init__()
         self.form = form
+        self.q_dim = q_dim
         self.dt = dt
         self.n_substeps = n_substeps
         if form == "lagrangian":
-            self.mass = MassMatrix(q_dim=2, hidden_size=hidden, hidden_layers=2, angle_dims=(1,))
-            self.potential = Potential(q_dim=2, hidden_size=hidden, hidden_layers=2, angle_dims=(1,))
-            self.damping = LinearDissipation(q_dim=2)
+            self.mass = MassMatrix(q_dim=q_dim, hidden_size=hidden, hidden_layers=2, angle_dims=angle_dims)
+            self.potential = Potential(q_dim=q_dim, hidden_size=hidden, hidden_layers=2, angle_dims=angle_dims)
+            self.damping = LinearDissipation(q_dim=q_dim)
             self.actuation = Actuation(
-                q_dim=2, action_dim=action_dim, hidden_size=hidden, hidden_layers=2, angle_dims=(1,),
+                q_dim=q_dim, action_dim=action_dim, hidden_size=hidden, hidden_layers=2, angle_dims=angle_dims,
                 actuated_dims=actuated_dims,
             )
             # Low-dimensional adaptation slots (identity at init).
-            self.mass_offset = nn.Parameter(torch.zeros(2))
+            self.mass_offset = nn.Parameter(torch.zeros(q_dim))
             self.log_gain = nn.Parameter(torch.zeros(()))
-            self.register_buffer("mass_scale", torch.ones(2), persistent=False)
+            self.register_buffer("mass_scale", torch.ones(q_dim), persistent=False)
         elif form == "mlp":
             self.mlp = MLPDynamics(
-                q_dim=2, action_dim=action_dim, hidden_size=2 * hidden, hidden_layers=2, angle_dims=(1,),
+                q_dim=q_dim, action_dim=action_dim, hidden_size=2 * hidden, hidden_layers=2, angle_dims=angle_dims,
             )
         else:
             raise ValueError(f"unknown dynamics form {form!r}")
@@ -119,7 +122,7 @@ class DynamicsWrapper(nn.Module):
         )
 
     def rollout(self, q: torch.Tensor, qdot: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-        """``q, qdot [N, 2]``, ``actions [N, H, A]`` -> predicted ``q [N, H, 2]``."""
+        """``q, qdot [N, D]``, ``actions [N, H, A]`` -> predicted ``q [N, H, D]``."""
 
         dynamics = self._dynamics()
         out = []
@@ -179,7 +182,9 @@ class _GainActuation(nn.Module):
 
 
 def _pose(q: torch.Tensor) -> torch.Tensor:
-    return torch.stack([q[..., 0], torch.cos(q[..., 1]), torch.sin(q[..., 1])], dim=-1)
+    """``(x, cos θ_1.., sin θ_1..)`` for ``q = (x, θ_1, …)``; ``(x, cos θ, sin θ)`` for cartpole."""
+
+    return torch.cat([q[..., :1], torch.cos(q[..., 1:]), torch.sin(q[..., 1:])], dim=-1)
 
 
 Windows = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
@@ -201,7 +206,7 @@ def _windows(
     rail_margin: float | None = None,
     rail_reference: np.ndarray | None = None,
 ) -> Windows:
-    """Windows: start ``q, qdot [N, 2]``, ``actions [N, H, A]``, targets ``[N, H, 2]``.
+    """Windows: start ``q, qdot [N, D]``, ``actions [N, H, A]``, targets ``[N, H, D]``.
 
     With ``rail_margin`` set, windows whose cart reaches ``|x| >= 1.8 - margin``
     (start or any target frame) are dropped. ``rail_reference`` (``qpos``-shaped,
@@ -213,10 +218,11 @@ def _windows(
     qpos, qvel, actions = episodes.qpos, episodes.qvel, episodes.actions
     frames = qpos.shape[1]
     starts = np.arange(0, frames - horizon, stride)
-    q0 = qpos[:, starts].reshape(-1, 2)
-    v0 = qvel[:, starts].reshape(-1, 2)
+    dim = qpos.shape[-1]
+    q0 = qpos[:, starts].reshape(-1, dim)
+    v0 = qvel[:, starts].reshape(-1, dim)
     act = np.stack([actions[:, s : s + horizon] for s in starts], axis=1).reshape(-1, horizon, actions.shape[-1])
-    tgt = np.stack([qpos[:, s + 1 : s + 1 + horizon] for s in starts], axis=1).reshape(-1, horizon, 2)
+    tgt = np.stack([qpos[:, s + 1 : s + 1 + horizon] for s in starts], axis=1).reshape(-1, horizon, dim)
     if rail_margin is not None:
         ref = qpos if rail_reference is None else rail_reference
         reach = np.stack([np.abs(ref[:, s : s + horizon + 1, 0]).max(axis=1) for s in starts], axis=1)

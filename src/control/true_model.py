@@ -7,7 +7,7 @@ import mujoco.rollout
 import numpy as np
 from numpy.typing import NDArray
 
-from control.reward import swingup_reward
+from control.reward import poles_reward
 
 STATE_SPEC = mujoco.mjtState.mjSTATE_FULLPHYSICS  # [time, qpos, qvel, act]
 
@@ -23,7 +23,8 @@ class MujocoBackend:
 
     Each action is held for ``action_repeat`` physics steps, as in the
     environment; the reward is the closed-form swing-up reward on every
-    physics step (summed per decision), exactly as dm_control scores it.
+    physics step (summed per decision), exactly as dm_control scores it, for
+    any number of poles.
     """
 
     def __init__(self, model: mujoco.MjModel, action_repeat: int = 2, nthread: int = 4) -> None:
@@ -42,7 +43,7 @@ class MujocoBackend:
         nq = self.model.nq
         qpos = states[..., 1:1 + nq]                                  # [N, H*r, nq]
         qvel = states[..., 1 + nq:1 + nq + self.model.nv]
-        reward = swingup_reward(qpos[..., 0], np.cos(qpos[..., 1]), qvel[..., 1], control[..., 0])
+        reward = poles_reward(qpos[..., 0], qpos[..., 1:], qvel[..., 1:], control[..., 0])
         reward = reward.reshape(n, h, r).sum(axis=-1)
         cart_x = qpos[..., 0].reshape(n, h, r)[..., -1]
         return reward, cart_x
