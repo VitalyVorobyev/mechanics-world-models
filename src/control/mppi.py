@@ -79,3 +79,7 @@ class MPPI:
 
 # Frozen by E-006 (docs/experiments/E-006-planner-ceiling.md); reused unchanged by every later arm.
 E006_PLANNER = MPPIConfig(horizon=75, samples=512, noise_std=0.5, temperature=1.0)
+
+# Frozen by E-009 (docs/experiments/E-009-two-poles-ceiling.md) for the two-pole cartpole.
+E009_PLANNER = MPPIConfig(horizon=150, samples=512, noise_std=0.5, temperature=1.0)
+E009_CEILING = 422.0  # E-009 mean return over evaluation seeds 0-4 (C-019)

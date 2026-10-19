@@ -85,6 +85,16 @@ no return deficit, `pred_error_1s` at most half the MLP's.
   cartpole (70), hence the extra 2-of-3-seeds condition; 0.85 matches
   E-008.
 
+**Note before any run (2026-10-19, after E-009):** the E-009 ceiling is
+422 (C-019), so 0.85 of it is 358, below the about 410 that the
+half-solution (first pole hanging, second balanced) earns. The "reaches
+0.85" conditions therefore do not show that a model balances both
+poles; results will also report `upright_fraction_second_half` (both
+poles upright). The headline (Lagrangian − MLP) and the decision rule are
+unchanged. Planner: E009_PLANNER (horizon 150, 512 samples, noise 0.5).
+Measured planning cost on random weights: Lagrangian 0.47 s, MLP 0.07 s
+per decision (3 threads).
+
 ## Prerequisites
 - E-009 done (setting frozen, ceiling measured, held-out episodes saved).
 - New code, committed and tested before any run:

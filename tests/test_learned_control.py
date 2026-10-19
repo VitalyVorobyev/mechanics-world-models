@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from control.learned import LearnedBackend, TrainConfig, episodes_to_states, run_episode, train_model
+from control.learned import LearnedBackend, TrainConfig, episodes_to_states, make_model, run_episode, train_model
 from control.mppi import MPPI, MPPIConfig
 from control.true_model import MujocoBackend, get_state
 from oracles.context import simulate_state_episodes
@@ -52,3 +52,28 @@ def test_run_episode_and_training_round_trip() -> None:
     reward, _ = LearnedBackend(model).evaluate((episode.qpos[0], episode.qvel[0]), np.zeros((2, 3, 1)))
     assert reward.shape == (2, 3)
 
+
+
+def test_two_pole_models_train_and_plan() -> None:
+    random = simulate_state_episodes(None, episodes=1, seed=0, env_name="cartpole-two_poles")
+    assert random.qpos.shape == (1, 501, 3) and random.actions.shape == (1, 500, 1)
+    for form in ("lagrangian", "mlp"):
+        model, loss = train_model(form, random, TrainConfig(steps=3, batch_size=16), seed=0)
+        assert np.isfinite(loss) and model.q_dim == 3
+        q, qdot = random.qpos[0, 0], random.qvel[0, 0]
+        reward, cart_x = LearnedBackend(model).evaluate((q, qdot), np.zeros((2, 4, 1)))
+        assert reward.shape == (2, 4) and np.all(np.isfinite(reward))
+        rebuilt = make_model(form, TrainConfig(), 0.02, q_dim=3)
+        rebuilt.load_state_dict(model.state_dict())
+
+
+def test_prediction_error_wraps_angles() -> None:
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "oracles"))
+    from prediction_error import wrapped_error
+
+    pred = torch.tensor([[0.1, np.pi - 0.05, 0.0]])
+    target = torch.tensor([[0.0, -np.pi + 0.05, 2 * np.pi]])
+    assert torch.allclose(wrapped_error(pred, target), torch.tensor([[0.1, 0.1, 0.0]]), atol=1e-5)
