@@ -49,6 +49,33 @@ Last full review: 2026-10-19 (see [`review-2026-10-19.md`](review-2026-10-19.md)
 - **Evidence:** `learned_control/20261019-102526`, `learned_control/20261019-102520`, `learned_control/20261019-102525`, `learned_control/20261019-121303`, `learned_control/20261019-121227`, `learned_control/20261019-121254`, `learned_control/20261019-101041`, `learned_control/20261019-103007`, `learned_control/20261019-104930`, `learned_control/20261019-102732`, `learned_control/20261019-104654`, `learned_control/20261019-110928`
 - **Hypotheses:** H-LAG-CTRL, H-LAG-DATA
 
+### C-017 — A keypoint reader trained on renders of uniformly sampled states reads the pose to 0.2°
+- **Grade:** B (one training seed)
+- **Claim:** a `KeypointEncoder` (spatial softmax) supervised with the
+  projected cart and pole-tip positions of 50k frames rendered at uniform
+  states (x in ±1.8 m, θ uniform), camera 0 widened to 71.9° (14.5 px/m at
+  84 px), reads θ to 0.18° median (0.19° upright, 0.45° p90, 1.1° max) and
+  the cart to 0.04 px median on 5000 held-out frames; (x, θ) comes from the
+  keypoints by the camera geometry alone. 20k steps take 10.5 min on MPS.
+- **Evidence:** `keypoint_reader/20261019-111217`
+- **Hypotheses:** H-KP
+
+### C-018 — Camera images → keypoints → fixed-lag estimator → learned Lagrangian → MPPI swings up and balances cartpole
+- **Grade:** A
+- **Claim:** with the C-017 reader, a 12-frame fixed-lag estimator through
+  the planning model, and the E-006 planner:
+  - a Lagrangian learned **only from camera poses** (60 random episodes plus
+    3 rounds of 10 own camera episodes) returns 836 ± 9 (3 training seeds ×
+    5 episodes), 0.977 of the true-state learned Lagrangian (856 ± 3);
+  - the true-state Lagrangians driven from camera images return 839–840;
+    the true model driven from camera images 840 ± 4; finite-difference
+    velocities instead of the estimator 788 ± 22.
+  - A planning decision takes about 0.3 s on the laptop CPU.
+- **Scope:** nominal parameters, simulated camera (no lighting or
+  background changes), single pole.
+- **Evidence:** `learned_control/20261019-141842`, `learned_control/20261019-144851`, `learned_control/20261019-144836`, `camera_control/20261019-113017`, `camera_control/20261019-113108`, `camera_control/20261019-113200`, `camera_control/20261019-113251`, `camera_control/20261019-113341`, `camera_control/20261019-121608`, `camera_control/20261019-122850`, `camera_control/20261019-124131`, `camera_control/20261019-130003`
+- **Hypotheses:** H-CAM-LAG, H-KP
+
 ## Dynamics on true state (H1b, backlog)
 
 ### C-001 — Lagrangian slot context extrapolates in cart mass; the context MLP does not
