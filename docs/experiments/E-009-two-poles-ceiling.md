@@ -1,11 +1,11 @@
 # E-009 — Planner ceiling on the two-pole cartpole
 
-- **Status:** registered (awaiting owner approval)
+- **Status:** approved
 - **Question node:** Q4
 - **Hypotheses:** H-PLAN-2P
 - **Budget:** 3 agent-hours, 1.5 CPU-hours (stop and report at 150%)
 - **Proposed:** 2026-10-19
-- **Approved:** —
+- **Approved:** owner, 2026-10-19 (with the Q4 budget extension; E-010 starts only after the E-009 decision rule allows it)
 
 ## Question
 Before asking whether a learned Lagrangian beats an MLP on a harder

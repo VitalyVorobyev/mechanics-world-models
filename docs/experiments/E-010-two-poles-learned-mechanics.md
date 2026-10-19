@@ -1,11 +1,11 @@
 # E-010 — Learned Lagrangian vs MLP on the two-pole cartpole, true state
 
-- **Status:** registered (awaiting owner approval)
+- **Status:** approved
 - **Question node:** Q4
 - **Hypotheses:** H-LAG-2P, H-LAG-PRED-2P
 - **Budget:** 12 agent-hours, 25 CPU-hours (stop and report at 150%)
 - **Proposed:** 2026-10-19
-- **Approved:** —
+- **Approved:** owner, 2026-10-19 (with the Q4 budget extension; E-010 starts only after the E-009 decision rule allows it)
 
 ## Question
 On cartpole the Lagrangian structure bought nothing: an MLP planned as

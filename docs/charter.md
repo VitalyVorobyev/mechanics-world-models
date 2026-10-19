@@ -86,7 +86,7 @@ Numbers to compare against, not systems to run on a laptop:
 
 - **Whole charter:** two weeks of calendar time, laptop CPU/MPS only.
   Planned compute: about 15 CPU-hours plus 1 MPS-hour.
-- **Q4 extension (requested 2026-10-19, pending owner approval):** about
+- **Q4 extension (approved by the owner 2026-10-19):** about
   27 CPU-hours more (E-009 1.5, E-010 25); the first charter budget is
   spent (about 18 CPU-hours used).
 - **Per experiment:** each record states its agent-hours and

@@ -26,14 +26,14 @@ date 2026-11-02.
 | E-006 | Q1 | MPPI over the true model | done: 861 ± 3 (C-015) |
 | E-007 | Q2 | MPPI over a learned Lagrangian vs an MLP, data rounds | done: 856 ± 3 vs 853 ± 2 (C-016) |
 | E-008 | Q3 | Keypoints + estimator in the loop; camera-learned model | done: ratio 0.977 (C-017, C-018) |
-| E-009 | Q4 | Two-pole cartpole: true-model MPPI ceiling | registered, awaiting approval |
-| E-010 | Q4 | Two-pole cartpole: learned Lagrangian vs MLP, true state | registered, awaiting approval |
+| E-009 | Q4 | Two-pole cartpole: true-model MPPI ceiling | approved |
+| E-010 | Q4 | Two-pole cartpole: learned Lagrangian vs MLP, true state | approved |
 | E-001…E-005 | — | Known-model plan | abandoned (never run) |
 
 Compute used so far: about 18 CPU process-hours (E-007 ≈ 8.5 of 8 budgeted, E-008 ≈ 9.5 of 8: both within the 150% limit) and 0.2 MPS-hours. The first charter budget is spent.
 
 ## Waiting on the owner
-1. Approve E-009 and E-010, and the Q4 budget extension of about
+1. Nothing blocking: E-009 and E-010 approved with the Q4 budget extension of about
    27 CPU-hours (E-009 1.5, E-010 25; 8–10 hours wall-clock).
 
 ## Last decisions
