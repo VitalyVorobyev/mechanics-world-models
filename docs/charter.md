@@ -10,7 +10,8 @@ archived in [`archive/research_spec_2026-04.md`](archive/research_spec_2026-04.m
 - **Decision due on the stop date (D-1):** does the cartpole demo work
   (camera → learned Lagrangian → planner, closed loop)? If yes, is the
   next step a more complex system, and which one? If no, which measured
-  gap blocks it?
+  gap blocks it? **Taken early on 2026-10-19:** yes; next is the
+  two-pole cartpole (Q4). The stop date stays.
 
 ## Goal (owner, 2026-10-19)
 
@@ -52,11 +53,12 @@ Every experiment record names one node. A node is closed by a claim in
 | Q1 | **Planner ceiling.** Does MPPI over the true MuJoCo model swing up and balance cartpole from true state? | E-006 | closed (C-015) |
 | Q2 | **Learned mechanics on true state.** Does MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reach the ceiling? How does an MLP dynamics model do with the same budget? | E-007 | closed (C-016) |
 | Q3 | **Camera in the loop.** With a sim-trained keypoint reader and a model-based estimator, does the Q2 controller hold its return from camera images, including with a model learned from camera poses? Then the demo. | E-008 | closed (C-017, C-018) |
+| Q4 | **Does the structure pay on a harder system?** On the dm_control two-pole cartpole swing-up (3 DoF, coupled configuration-dependent mass matrix), first on true state: the true-model ceiling, then a learned Lagrangian against an MLP with the same data rounds. The camera stage follows only if the structure shows an advantage. | E-009, E-010 | open |
 
 **Backlog** (not registered; needs a node and an owner decision):
-- a more complex system: dm_control `cartpole.two_poles` /
-  `three_poles` swing-up (checked present in the installed version), or a
-  simulated arm with a pendulum payload;
+- `cartpole.three_poles`, the acrobot swing-up (fallback if two poles
+  fails the ceiling), or a simulated arm with a pendulum payload;
+- the camera stage on two poles (E-011, after E-010);
 - parameter adaptation (H1b; the abandoned E-001, E-003, E-004);
 - robust errors-in-variables estimation (abandoned E-005; reopens if Q3
   fails on pose outliers);
@@ -84,6 +86,9 @@ Numbers to compare against, not systems to run on a laptop:
 
 - **Whole charter:** two weeks of calendar time, laptop CPU/MPS only.
   Planned compute: about 15 CPU-hours plus 1 MPS-hour.
+- **Q4 extension (requested 2026-10-19, pending owner approval):** about
+  27 CPU-hours more (E-009 1.5, E-010 25); the first charter budget is
+  spent (about 18 CPU-hours used).
 - **Per experiment:** each record states its agent-hours and
   compute-hours. At 150% of either, the experiment stops and goes back to
   the owner.
@@ -98,3 +103,4 @@ Numbers to compare against, not systems to run on a laptop:
 | 2026-10-18 | Stop the pixel gate run; pivot to H1b on true state | owner + agent | archived status log |
 | 2026-10-19 | Stop the OOD world-model comparison; adopt this charter and protocol v2. Goal clarified: camera-driven, mechanics-aware control; novelty not required. E-001…E-005 registered, none approved | owner | [`review-2026-10-19.md`](review-2026-10-19.md) |
 | 2026-10-19 | Re-charter: the aim is to *learn* the mechanics (cartpole is a showcase for more complex systems), not to adapt parameters of known equations. E-001…E-005 abandoned before any run. New tree Q1–Q3 (E-006…E-008). Perception: keypoints trained on simulator renders. Scope: the cartpole demo only; the complex-system step is decided on the stop date | owner | this conversation; plan of 2026-10-19 |
+| 2026-10-19 | D-1 taken early: Q0 holds on cartpole; continue with a harder system, chosen by the agent: the dm_control two-pole cartpole (node Q4, E-009, E-010). The owner wants to see whether the Lagrangian structure has an advantage; the records must allow the answer "no" | owner (system chosen by agent) | this conversation |

@@ -26,24 +26,21 @@ date 2026-11-02.
 | E-006 | Q1 | MPPI over the true model | done: 861 ± 3 (C-015) |
 | E-007 | Q2 | MPPI over a learned Lagrangian vs an MLP, data rounds | done: 856 ± 3 vs 853 ± 2 (C-016) |
 | E-008 | Q3 | Keypoints + estimator in the loop; camera-learned model | done: ratio 0.977 (C-017, C-018) |
+| E-009 | Q4 | Two-pole cartpole: true-model MPPI ceiling | registered, awaiting approval |
+| E-010 | Q4 | Two-pole cartpole: learned Lagrangian vs MLP, true state | registered, awaiting approval |
 | E-001…E-005 | — | Known-model plan | abandoned (never run) |
 
-Compute used today: about 18 CPU process-hours (E-007 ≈ 8.5 of 8 budgeted, E-008 ≈ 9.5 of 8: both within the 150% limit) and 0.2 MPS-hours.
+Compute used so far: about 18 CPU process-hours (E-007 ≈ 8.5 of 8 budgeted, E-008 ≈ 9.5 of 8: both within the 150% limit) and 0.2 MPS-hours. The first charter budget is spent.
 
 ## Waiting on the owner
-1. The stop-date decision (D-1) can be taken early: Q0 holds for cartpole.
-   Pick the next step:
-   - a harder system to test whether learned mechanics matter
-     (dm_control `cartpole.two_poles` / `three_poles` swing-up, first on true
-     state against an MLP), or
-   - robustness of the camera path (lighting, background, real camera
-     noise), or
-   - stop here.
-2. Push the branch `october-2026-review` (local only so far).
+1. Approve E-009 and E-010, and the Q4 budget extension of about
+   27 CPU-hours (E-009 1.5, E-010 25; 8–10 hours wall-clock).
 
 ## Last decisions
+- 2026-10-19: D-1 taken early; continue with a harder system (agent's
+  choice: two-pole cartpole, node Q4); the owner wants to see whether the
+  Lagrangian has an advantage. Branch `october-2026-review` merged to
+  `main` (PR #1); pushes and merges have a general green light.
 - 2026-10-19: E-006…E-008 approved and run; Q1–Q3 closed.
 - 2026-10-19: re-charter: learn the mechanics; cartpole demo only; keypoints
   trained on renders; E-001…E-005 abandoned.
-- 2026-10-19: OOD world-model comparison stopped; charter and protocol v2
-  adopted.
