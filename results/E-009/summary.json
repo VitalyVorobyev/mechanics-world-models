@@ -1,0 +1,106 @@
+{
+  "conditions": [
+    {
+      "config": {
+        "action_repeat": 2,
+        "dynamics": "true",
+        "env": "cartpole-two_poles",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 421.6123037826408,
+          "n": 5,
+          "std": 43.839941928306246,
+          "values": {
+            "0": 350.9694763643871,
+            "1": 429.0169259143813,
+            "2": 454.94901637134296,
+            "3": 413.2806694591403,
+            "4": 459.84543080395247
+          }
+        }
+      },
+      "runs": {
+        "0": "control_episode/20261019-203551-4",
+        "1": "control_episode/20261019-203551",
+        "2": "control_episode/20261019-203551-2",
+        "3": "control_episode/20261019-203551-3",
+        "4": "control_episode/20261019-203551-1"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "action_repeat": 2,
+        "dynamics": "zero",
+        "env": "cartpole-two_poles",
+        "mppi": null
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 0.5686987183842664,
+          "n": 5,
+          "std": 0.7511395556503551,
+          "values": {
+            "0": 0.42994337295180685,
+            "1": 0.14645287724779016,
+            "2": 1.8770485826003633,
+            "3": 0.0102900543493698,
+            "4": 0.379758704772002
+          }
+        }
+      },
+      "runs": {
+        "0": "control_episode/20261019-203552",
+        "1": "control_episode/20261019-203554",
+        "2": "control_episode/20261019-203556",
+        "3": "control_episode/20261019-203558",
+        "4": "control_episode/20261019-203600"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "action_repeat": 2,
+        "dynamics": "random",
+        "env": "cartpole-two_poles",
+        "mppi": null
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 26.924112878077445,
+          "n": 5,
+          "std": 12.622986738167132,
+          "values": {
+            "0": 20.534226113438947,
+            "1": 26.32523892983793,
+            "2": 27.059959920303708,
+            "3": 13.429130551951843,
+            "4": 47.27200887485478
+          }
+        }
+      },
+      "runs": {
+        "0": "control_episode/20261019-203553",
+        "1": "control_episode/20261019-203555",
+        "2": "control_episode/20261019-203557",
+        "3": "control_episode/20261019-203559",
+        "4": "control_episode/20261019-203601"
+      },
+      "superseded": []
+    }
+  ],
+  "patterns": [
+    "return_mean"
+  ]
+}

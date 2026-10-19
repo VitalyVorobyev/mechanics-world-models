@@ -76,6 +76,22 @@ Last full review: 2026-10-19 (see [`review-2026-10-19.md`](review-2026-10-19.md)
 - **Evidence:** `learned_control/20261019-141842`, `learned_control/20261019-144851`, `learned_control/20261019-144836`, `camera_control/20261019-113017`, `camera_control/20261019-113108`, `camera_control/20261019-113200`, `camera_control/20261019-113251`, `camera_control/20261019-113341`, `camera_control/20261019-121608`, `camera_control/20261019-122850`, `camera_control/20261019-124131`, `camera_control/20261019-130003`
 - **Hypotheses:** H-CAM-LAG, H-KP
 
+### C-019 — On the two-pole cartpole, MPPI over the true model swings up but does not hold balance
+- **Grade:** A
+- **Claim:** with horizon 150 decisions (3 s), 512 samples, noise std 0.5,
+  temperature 1.0 (best of an 8-setting grid plus the registered fix of 3
+  more), MPPI over the true MuJoCo model reaches a dm_control
+  `cartpole-two_poles` return of 422 ± 44 (5 episodes, sample std; best
+  possible about 1000). Both poles are upright for 16–22% of the frames in
+  4 of 5 episodes; they fall and are swung up again. Horizon 75 only finds
+  a half-solution (first pole hanging, second balanced on it: about 410).
+  Floors: zero action 0.6, random 27 ± 13. 0.36 s per decision on 2 CPU
+  threads.
+- **Scope:** nominal parameters, true state, action repeat 2, this MPPI
+  (one temperature, no planner change beyond the grid).
+- **Evidence:** `control_episode/20261019-203551-4`, `control_episode/20261019-203551`, `control_episode/20261019-203551-2`, `control_episode/20261019-203551-3`, `control_episode/20261019-203551-1`
+- **Hypotheses:** H-PLAN-2P
+
 ## Dynamics on true state (H1b, backlog)
 
 ### C-001 — Lagrangian slot context extrapolates in cart mass; the context MLP does not

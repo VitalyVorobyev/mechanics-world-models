@@ -26,7 +26,7 @@ archived verbatim in
 | H-LAG-DATA | With random data only, the learned Lagrangian plans better than an MLP (structure carries to unseen upright states) | refuted on cartpole (MLP 842 ± 3 vs Lagrangian 809 ± 70) | C-016 | two poles: H-LAG-2P (E-010) |
 | H-KP | A keypoint reader trained on renders of uniformly sampled states reads θ to ≤ 1° median, upright included | supported (0.19° upright) | C-017 | — |
 | H-CAM-LAG | Camera states (and a model learned from camera poses) keep ≥ 85% of the true-state return | supported (0.977 for the camera-learned model) | C-018 | — |
-| H-PLAN-2P | MPPI over the true model swings up the two-pole cartpole (return ≥ 600) | open | — | E-009 |
+| H-PLAN-2P | MPPI over the true model swings up the two-pole cartpole (return ≥ 600) | refuted (422 ± 44: swings up, does not hold balance) | C-019 | a better planner (new record) |
 | H-LAG-2P | On two poles, a learned Lagrangian plans better than an MLP from the same small data (≥ 50 points at round 0 or 1) | open | — | E-010 |
 | H-LAG-PRED-2P | On two poles, a Lagrangian learned from random data predicts unseen swing-up states at least 2× better than an MLP over 1 s | open | — | E-010 |
 | H1a | Structure improves extrapolation to unseen *states* of the same system | not supported in closed loop on cartpole (E-007 round 0) | C-016 | two poles: H-LAG-PRED-2P (E-010) |
