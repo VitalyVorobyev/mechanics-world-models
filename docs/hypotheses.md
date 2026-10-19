@@ -21,7 +21,7 @@ archived verbatim in
 
 | ID | Statement | Status | Evidence | Next test |
 |---|---|---|---|---|
-| H-PLAN | MPPI over the true MuJoCo model swings up and balances cartpole from true state (return ≥ 800) | open | — | E-006 |
+| H-PLAN | MPPI over the true MuJoCo model swings up and balances cartpole from true state (return ≥ 800) | supported (861 ± 3) | C-015 | — |
 | H-LAG-CTRL | MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reaches ≥ 700 | open | — | E-007 |
 | H-LAG-DATA | With random data only, the learned Lagrangian plans better than an MLP (structure carries to unseen upright states) | open | — | E-007 (round 0) |
 | H-KP | A keypoint reader trained on renders of uniformly sampled states reads θ to ≤ 1° median, upright included | open | C-011 (heuristic), C-013 (view) | E-008 |
@@ -51,5 +51,5 @@ archived verbatim in
 | A-KNOWN-1 | The known cartpole model with a few fitted parameters is adequate for control and as an upper bracket | backlog (abandoned E-001, E-004) | — |
 | A-CRB-1 | The Cramér–Rao bound for parameters under the pose-noise model is computable and informative | backlog | — |
 | A-COV-1 | Random-policy data covers the states needed for balancing | refuted for the data as collected: 0.3% of frames have cos θ > 0.9 (code survey 2026-10-19, not ledgered); E-007 adds on-policy rounds | — |
-| A-RAIL-2 | The planner can keep the cart off the rail with a cost alone, although the learned models have no rail | assumed | E-006, E-007 |
+| A-RAIL-2 | The planner can keep the cart off the rail with a cost alone, although the learned models have no rail | supported for the true model (cart within ±1.14 m); open for learned models | C-015, E-007 |
 | A-DEC-1, A-ROUTE-1, A-DT-1, A-OOD-1, A-OOD-4, A-DATA-1, A-PROBE-1, A-METRIC-1, A-LEAK-1, A-DISS-1, A-LAG-1, A-BASE-1, A-MPS-1, A-ENV-1, D-GAUGE, D-K1 | Pixel world-model assumptions and diagnoses (April–October 2026) | resolved or frozen with the pixel world models | archived log, C-014 |

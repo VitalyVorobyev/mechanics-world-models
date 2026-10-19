@@ -20,7 +20,21 @@ Rules:
 
 Last full review: 2026-10-19 (see [`review-2026-10-19.md`](review-2026-10-19.md); no claim is grade A yet).
 
-## Dynamics on true state (Q1)
+## Closed-loop control (current charter)
+
+### C-015 — MPPI over the true MuJoCo model solves swing-up from true state
+- **Grade:** A
+- **Claim:** MPPI (horizon 75 decisions = 1.5 s, 512 samples, noise std
+  0.5, temperature 1.0, rail cost beyond 1.6 m) over `mujoco.rollout` with
+  the closed-form swing-up reward reaches a dm_control cartpole-swingup
+  return of 861 ± 3 (5 episodes, sample std); the pole is upright for the
+  whole second half of every episode; 84 ms per decision on 4 CPU threads.
+  Floors: zero action 0.005, random 64 ± 38.
+- **Scope:** nominal parameters, true state, action repeat 2.
+- **Evidence:** `control_episode/20261019-094818`, `control_episode/20261019-094818-1`, `control_episode/20261019-094817`, `control_episode/20261019-094858-1`, `control_episode/20261019-094858`
+- **Hypotheses:** H-PLAN
+
+## Dynamics on true state (H1b, backlog)
 
 ### C-001 — Lagrangian slot context extrapolates in cart mass; the context MLP does not
 - **Grade:** B
