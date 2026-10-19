@@ -25,7 +25,9 @@ from pathlib import Path
 from research import ledger
 from research.provenance import REPO_ROOT
 from research.records import find_record, replace_report
-from research.report import filter_conditions, group_runs, markdown, parse_where, report_patterns, summary_json
+from research.report import (
+    filter_conditions, group_runs, markdown, parse_seeds, parse_where, report_patterns, summary_json,
+)
 
 
 def main() -> None:
@@ -34,6 +36,7 @@ def main() -> None:
     parser.add_argument("--glob", action="append", default=[], help="result files to aggregate instead")
     parser.add_argument("--where", action="append", default=[], help="config filter key=value (JSON values)")
     parser.add_argument("--metric", action="append", default=[], help="metric pattern (repeatable)")
+    parser.add_argument("--seeds", help="keep only these seeds, e.g. 0-4 (leave out tuning runs)")
     parser.add_argument("--no-write", action="store_true", help="print only; do not update the record")
     args = parser.parse_args()
 
@@ -56,7 +59,7 @@ def main() -> None:
     if not patterns:
         parser.error("no metric patterns (pass --metric or put a `Report:` line in the record's Primary metric)")
 
-    conditions = filter_conditions(group_runs(paths), parse_where(args.where))
+    conditions = filter_conditions(group_runs(paths, seeds=parse_seeds(args.seeds)), parse_where(args.where))
     table = markdown(conditions, patterns)
     print(table)
     if record is not None and not args.no_write:

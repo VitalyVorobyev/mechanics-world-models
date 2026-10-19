@@ -14,7 +14,7 @@ from oracles.common import Criterion, OracleResult
 from research import ledger, provenance
 from research.check import check_claims, check_experiment_runs, check_records, run_all
 from research.records import REPORT_BEGIN, REPORT_END, protected_text, replace_report, status
-from research.report import group_runs, markdown, report_patterns, summarize
+from research.report import group_runs, markdown, parse_seeds, report_patterns, summarize
 
 RECORD = """# E-001 — demo
 
@@ -171,6 +171,9 @@ def test_report_groups_seeds_supersedes_and_ratios(tmp_path: Path) -> None:
     stats = summarize(base, ["{shift}.a / {shift}.b"])["s1.a / s1.b"]
     assert stats["mean"] == pytest.approx(4.0) and stats["n"] == 2
     assert "`variant`" in markdown(conditions, ["s1.a"])
+    only_seed_0 = group_runs(sorted(tmp_path.glob("*.json")), seeds=parse_seeds("0"))
+    assert all(set(c.runs) == {0} for c in only_seed_0)
+    assert parse_seeds("0-2,7") == [0, 1, 2, 7] and parse_seeds(None) is None
 
 
 def test_record_helpers() -> None:

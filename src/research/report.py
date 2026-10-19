@@ -32,13 +32,21 @@ def _canonical(config: dict[str, Any], drop: Sequence[str]) -> str:
     return json.dumps({k: v for k, v in config.items() if k not in drop}, sort_keys=True, default=str)
 
 
-def group_runs(paths: Iterable[Path], drop: Sequence[str] = PER_SEED_KEYS) -> list[Condition]:
+def group_runs(
+    paths: Iterable[Path], drop: Sequence[str] = PER_SEED_KEYS, seeds: Iterable[Any] | None = None,
+) -> list[Condition]:
+    """Group result files by config minus ``drop``; ``seeds`` keeps only runs with those seeds
+    (e.g. evaluation seeds, leaving out tuning runs that share a config)."""
+
+    keep = None if seeds is None else set(seeds)
     conditions: dict[str, Condition] = {}
     for path in sorted(paths):  # file names are timestamps, so later files win
         if path.name == "latest.json":
             continue
         payload = json.loads(path.read_text())
         config = payload.get("config", {})
+        if keep is not None and config.get("seed") not in keep:
+            continue
         key = _canonical(config, drop)
         condition = conditions.setdefault(key, Condition(config={k: v for k, v in config.items() if k not in drop}))
         seed = config.get("seed")
@@ -60,6 +68,18 @@ def _loose_equal(value: Any, wanted: Any) -> bool:
     if isinstance(wanted, str) and not isinstance(value, str):
         return json.dumps(value, default=str) == wanted or str(value) == wanted
     return value == wanted
+
+
+def parse_seeds(text: str | None) -> list[int] | None:
+    """``"0-4"`` or ``"0,1,5"`` (or a mix) to a list of ints; ``None`` keeps all seeds."""
+
+    if not text:
+        return None
+    seeds: list[int] = []
+    for part in text.split(","):
+        low, _, high = part.partition("-")
+        seeds.extend(range(int(low), int(high) + 1) if high else [int(low)])
+    return seeds
 
 
 def parse_where(items: Sequence[str]) -> dict[str, Any]:
