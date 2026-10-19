@@ -116,6 +116,153 @@ per decision (3 threads).
 
 ## Result
 <!-- report:begin -->
+**Condition 1:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-204328`, `learned_control/20261019-204746`, `learned_control/20261019-204747`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 192 ± 23.2 (3) | 209 / 166 / 202 |
+| `upright_fraction_second_half` | 0.004 ± 0.005 (3) | 0.0024 / 0.00e+00 / 0.0096 |
+| `decision_time_mean_s` | 0.0776 ± 0.00523 (3) | 0.0836 / 0.0745 / 0.0747 |
+
+**Condition 2:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=1, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-205912`, `learned_control/20261019-205748`, `learned_control/20261019-205751`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 262 ± 19 (3) | 283 / 247 / 256 |
+| `upright_fraction_second_half` | 0.00853 ± 0.00201 (3) | 0.0064 / 0.0088 / 0.0104 |
+| `decision_time_mean_s` | 0.0894 ± 0.0284 (3) | 0.122 / 0.0729 / 0.0732 |
+
+**Condition 3:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=2, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-211032`, `learned_control/20261019-210816`, `learned_control/20261019-210821`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 319 ± 28.3 (3) | 306 / 299 / 351 |
+| `upright_fraction_second_half` | 0.0347 ± 0.0228 (3) | 0.036 / 0.0112 / 0.0568 |
+| `decision_time_mean_s` | 0.0781 ± 0.00341 (3) | 0.082 / 0.076 / 0.0762 |
+
+**Condition 4:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-211517`, `learned_control/20261019-211918`, `learned_control/20261019-211921`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 193 ± 18.6 (3) | 199 / 173 / 208 |
+| `upright_fraction_second_half` | 0.00e+00 ± 0.00e+00 (3) | 0.00e+00 / 0.00e+00 / 0.00e+00 |
+| `decision_time_mean_s` | 0.621 ± 0.0103 (3) | 0.633 / 0.614 / 0.615 |
+
+**Condition 5:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=3, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-212139`, `learned_control/20261019-211843`, `learned_control/20261019-211851`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 318 ± 19.1 (3) | 329 / 329 / 296 |
+| `upright_fraction_second_half` | 0.0245 ± 0.0271 (3) | 0.0536 / 0.02 / 0.00e+00 |
+| `decision_time_mean_s` | 0.0769 ± 0.00141 (3) | 0.0785 / 0.076 / 0.0762 |
+
+**Condition 6:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=20, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-212305`, `learned_control/20261019-212711`, `learned_control/20261019-213117`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 185 ± 1.3 (3) | 186 / 185 / 183 |
+| `upright_fraction_second_half` | 0.0016 ± 0.00277 (3) | 0.0048 / 0.00e+00 / 0.00e+00 |
+| `decision_time_mean_s` | 0.075 ± 1.32e-04 (3) | 0.0749 / 0.0751 / 0.0751 |
+
+**Condition 7:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="mlp", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=200, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-213530`, `learned_control/20261019-213942`, `learned_control/20261019-214354`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 202 ± 10.1 (3) | 212 / 201 / 192 |
+| `upright_fraction_second_half` | 0.00587 ± 0.0068 (3) | 0.0136 / 0.0032 / 8.00e-04 |
+| `decision_time_mean_s` | 0.0739 ± 1.20e-04 (3) | 0.0739 / 0.074 / 0.0738 |
+
+**Condition 8:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=20, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-215543`, `learned_control/20261019-222818`, `learned_control/20261019-225952`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 189 ± 22.1 (3) | 169 / 184 / 213 |
+| `upright_fraction_second_half` | 0.00e+00 ± 0.00e+00 (3) | 0.00e+00 / 0.00e+00 / 0.00e+00 |
+| `decision_time_mean_s` | 0.565 ± 0.0252 (3) | 0.592 / 0.56 / 0.543 |
+
+**Condition 9:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=1, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-223747`, `learned_control/20261019-224144`, `learned_control/20261019-224201`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 243 ± 30 (3) | 221 / 231 / 277 |
+| `upright_fraction_second_half` | 0.00e+00 ± 0.00e+00 (3) | 0.00e+00 / 0.00e+00 / 0.00e+00 |
+| `decision_time_mean_s` | 0.57 ± 0.00221 (3) | 0.571 / 0.567 / 0.572 |
+
+**Condition 10:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=200, `round`=0, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-233219`, `learned_control/20261020-000513`, `learned_control/20261020-003657`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 216 ± 17.6 (3) | 199 / 214 / 234 |
+| `upright_fraction_second_half` | 0.00e+00 ± 0.00e+00 (3) | 0.00e+00 / 0.00e+00 / 0.00e+00 |
+| `decision_time_mean_s` | 0.551 ± 0.00858 (3) | 0.551 / 0.559 / 0.542 |
+
+**Condition 11:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=2, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261019-235839`, `learned_control/20261020-000244`, `learned_control/20261020-000326`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 323 ± 20.2 (3) | 300 / 332 / 337 |
+| `upright_fraction_second_half` | 0.0221 ± 0.0152 (3) | 0.0072 / 0.0376 / 0.0216 |
+| `decision_time_mean_s` | 0.572 ± 0.00122 (3) | 0.572 / 0.571 / 0.574 |
+
+**Condition 12:** `collect_noise`=0.3, `episodes`=null, `eval_seeds`=[0, 1, 2, 3, 4], `form`="lagrangian", `horizon`=null, `mppi`={"action_dim": 1, "horizon": 150, "iterations": 1, "noise..., `q_dim`=3, `rail_margin`=null, `random_episodes`=60, `round`=3, `round_episodes`=10, `stride`=null, `train`={"batch_size": 128, "hidden": 64, "lr": 0.001, "n_substep...
+
+Runs (seed order): `learned_control/20261020-011651`, `learned_control/20261020-012041`, `learned_control/20261020-012126`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `return_mean` | 347 ± 10.2 (3) | 352 / 353 / 335 |
+| `upright_fraction_second_half` | 0.0189 ± 0.00743 (3) | 0.0272 / 0.0168 / 0.0128 |
+| `decision_time_mean_s` | 0.535 ± 0.00389 (3) | 0.539 / 0.534 / 0.532 |
+
+**Condition 13:** `collect_noise`=null, `episodes`=["runs/oracles/control_episode/20261019-203551-4.npz", "r..., `eval_seeds`=null, `form`="mlp", `horizon`=50, `mppi`=null, `q_dim`=null, `rail_margin`=0.2, `random_episodes`=60, `round`=0, `round_episodes`=null, `stride`=10, `train`=null
+
+Runs (seed order): `prediction_error/20261019-205351-1`, `prediction_error/20261019-205351-2`, `prediction_error/20261019-205350-1`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `pred_error_1s` | 0.458 ± 0.0398 (3) | 0.503 / 0.443 / 0.428 |
+| `pred_error_h10` | 0.0382 ± 0.00193 (3) | 0.0375 / 0.0404 / 0.0368 |
+| `pred_error_h25` | 0.158 ± 0.00807 (3) | 0.154 / 0.168 / 0.153 |
+| `pred_error_h50_q0` | 0.151 ± 0.0163 (3) | 0.141 / 0.142 / 0.17 |
+| `pred_error_h50_q1` | 0.332 ± 0.0284 (3) | 0.323 / 0.309 / 0.364 |
+| `pred_error_h50_q2` | 0.611 ± 0.125 (3) | 0.681 / 0.685 / 0.466 |
+
+**Condition 14:** `collect_noise`=null, `episodes`=["runs/oracles/control_episode/20261019-203551-4.npz", "r..., `eval_seeds`=null, `form`="lagrangian", `horizon`=50, `mppi`=null, `q_dim`=null, `rail_margin`=0.2, `random_episodes`=60, `round`=0, `round_episodes`=null, `stride`=10, `train`=null
+
+Runs (seed order): `prediction_error/20261019-205351`, `prediction_error/20261019-205350`, `prediction_error/20261019-205350-2`
+
+| metric | mean ± std (n) | per seed |
+|---|---|---|
+| `pred_error_1s` | 0.577 ± 0.116 (3) | 0.513 / 0.508 / 0.711 |
+| `pred_error_h10` | 0.0503 ± 0.0137 (3) | 0.0514 / 0.0361 / 0.0634 |
+| `pred_error_h25` | 0.205 ± 0.057 (3) | 0.185 / 0.161 / 0.27 |
+| `pred_error_h50_q0` | 0.161 ± 0.0295 (3) | 0.157 / 0.192 / 0.134 |
+| `pred_error_h50_q1` | 0.488 ± 0.123 (3) | 0.4 / 0.436 / 0.628 |
+| `pred_error_h50_q2` | 0.644 ± 0.192 (3) | 0.555 / 0.514 / 0.864 |
+
+_Generated by `scripts/research/report.py`; std is the sample std over seeds._
 <!-- report:end -->
 
 ## Belief update
