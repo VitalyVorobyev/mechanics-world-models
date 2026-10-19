@@ -14,6 +14,7 @@ from pathlib import Path
 
 from oracles.common import load_frames_with_state
 from oracles.decoder import run_decoder_oracle
+from research.provenance import add_run_args, begin_run
 
 
 def main() -> None:
@@ -27,7 +28,9 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--device", default="mps")
     parser.add_argument("--seed", type=int, default=0)
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
     train_images, train_qpos, _ = load_frames_with_state(
         args.dataset, split="train", max_episodes=args.train_episodes, seed=args.seed,
     )
@@ -39,7 +42,7 @@ def main() -> None:
         kind=args.kind, steps=args.steps, batch_size=args.batch_size, lr=args.lr,
         device=args.device, seed=args.seed, log=lambda m: print(m, flush=True),
     )
-    path = result.write()
+    path = result.write(run=run)
     print({k: round(v, 5) for k, v in result.metrics.items()})
     print(result.summary())
     print(f"wrote {path}")

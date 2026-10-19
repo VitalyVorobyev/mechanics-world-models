@@ -14,19 +14,22 @@ import argparse
 from pathlib import Path
 
 from oracles.gauge import run_mass_gauge
+from research.provenance import add_run_args, begin_run
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", action="append", required=True, help="NAME=PATH[:DIMS]")
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
     checkpoints = {}
     for item in args.model:
         name, _, rest = item.partition("=")
         path, _, dims = rest.partition(":")
         checkpoints[name] = (Path(path), tuple(int(d) for d in dims.split(",")) if dims else None)
     result = run_mass_gauge(checkpoints)
-    path = result.write()
+    path = result.write(run=run)
     for key, value in result.metrics.items():
         print(f"{key}: {value:.4f}")
     print(f"wrote {path}")

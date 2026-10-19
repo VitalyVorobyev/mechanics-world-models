@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 
 from oracles.intervention import run_intervention_effect
+from research.provenance import add_run_args, begin_run
 
 DEFAULT_SHIFTS = [
     "pole_mass_x07:body_mass_2=0.7",
@@ -42,12 +43,14 @@ def main() -> None:
     parser.add_argument("--shift", action="append", default=None)
     parser.add_argument("--seeds", type=int, default=8)
     parser.add_argument("--min-effect-h20", type=float, default=0.01)
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
     shifts = dict(_parse_shift(s) for s in (args.shift or DEFAULT_SHIFTS))
     result = run_intervention_effect(
         shifts, seeds=range(args.seeds), min_effect_h20=args.min_effect_h20,
     )
-    path = result.write()
+    path = result.write(run=run)
     for name in shifts:
         devs = "  ".join(
             f"h{h} {result.metrics[f'{name}.mean_abs_dev_h{h}']:.4f}" for h in (10, 20, 50)

@@ -27,6 +27,7 @@ import torch
 
 from oracles.common import load_shift_splits, load_state_episodes
 from oracles.dynamics import ADAPT_MODES, run_dynamics_oracle
+from research.provenance import add_run_args, begin_run
 
 
 def main() -> None:
@@ -51,7 +52,9 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--modes", nargs="+", default=list(ADAPT_MODES))
     parser.add_argument("--threads", type=int, default=4)
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
     torch.set_num_threads(args.threads)
 
     nominal_train = load_state_episodes(
@@ -81,7 +84,7 @@ def main() -> None:
         modes=args.modes,
         log=lambda msg: print(msg, flush=True),
     )
-    path = result.write()
+    path = result.write(run=run)
     print(result.summary())
     print(f"wrote {path}")
 

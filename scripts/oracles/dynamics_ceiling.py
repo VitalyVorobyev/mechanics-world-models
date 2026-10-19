@@ -15,6 +15,7 @@ from pathlib import Path
 
 from oracles.ceiling import run_dynamics_ceiling
 from oracles.common import load_state_episodes
+from research.provenance import add_run_args, begin_run
 
 
 def main() -> None:
@@ -23,7 +24,9 @@ def main() -> None:
     parser.add_argument("--max-episodes", type=int, default=10)
     parser.add_argument("--substeps", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--rail-margin", type=float, default=0.2)
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
 
     episodes = {}
     for item in args.dataset:
@@ -37,7 +40,7 @@ def main() -> None:
     result = run_dynamics_ceiling(
         episodes, substeps=args.substeps, rail_margin=args.rail_margin, log=lambda m: print(m, flush=True),
     )
-    path = result.write()
+    path = result.write(run=run)
     print(result.summary())
     print(f"wrote {path}")
 

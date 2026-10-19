@@ -25,6 +25,7 @@ import torch
 
 from oracles.common import StateEpisodes, load_shift_splits, load_state_episodes
 from oracles.context import CONTEXT_MODES, run_context_oracle, simulate_state_episodes
+from research.provenance import add_run_args, begin_run
 
 # Environment-name prefix per varied parameter (cart mass keeps its old names so caches stay valid).
 PARAM_PREFIX = {"body_mass_1": "cart_mass", "actuator_gear_0": "gear", "gravity": "gravity"}
@@ -104,7 +105,9 @@ def main() -> None:
     )
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/context_oracle/cache"))
+    add_run_args(parser)
     args = parser.parse_args()
+    run = begin_run(args)
     torch.set_num_threads(args.threads)
     if args.train_scales[0] != 1.0:
         parser.error("the first training scale must be the nominal 1.0 (its context is pinned to zero)")
@@ -182,7 +185,7 @@ def main() -> None:
         pose_outliers=(args.pose_outliers[0], args.pose_outliers[1], math.radians(args.pose_outliers[2])),
         huber_delta=args.huber_delta, cache_dir=args.cache_dir, log=lambda msg: print(msg, flush=True),
     )
-    path = result.write()
+    path = result.write(run=run)
     print(result.summary())
     print(f"wrote {path}")
 

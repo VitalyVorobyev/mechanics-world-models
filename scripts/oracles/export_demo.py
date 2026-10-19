@@ -35,7 +35,7 @@ import torch
 
 from oracles.ceiling import SLIDER_LIMIT
 from oracles.context import ContextDynamics, _Adapted, simulate_state_episodes
-from oracles.dynamics import _config_hash, _pose, _subset, _windows, fit, free_segments, windows_error
+from oracles.dynamics import _cache_key, _config_hash, _pose, _subset, _windows, fit, free_segments, windows_error
 
 TRAIN_SCALES = (1.0, 0.7, 0.85, 1.2, 1.4)
 SCENARIOS = {
@@ -93,7 +93,10 @@ def _load_models(spec: dict, seed: int, train_envs, cache_dir: Path, frame_dt: f
     }
     if spec["potential_slot"]:
         pretrain_config["potential_slot"] = True
-    root = cache_dir / "pretrained" / _config_hash(pretrain_config)
+    # Current caches are keyed with the source fingerprint; the 2026-10-18/19 runs used the config alone.
+    root = cache_dir / "pretrained" / _cache_key(pretrain_config)
+    if not root.exists():
+        root = cache_dir / "pretrained" / _config_hash(pretrain_config)
     calib = _windows(next(iter(train_envs.values())), 8, rail_margin=0.2)[0]
     models = {}
     for form in ("lagrangian", "mlp"):

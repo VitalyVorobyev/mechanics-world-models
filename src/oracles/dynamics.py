@@ -67,6 +67,7 @@ from models.mechanics.lagrangian import (
 )
 from oracles.ceiling import SLIDER_LIMIT
 from oracles.common import Criterion, OracleResult, StateEpisodes
+from research.provenance import source_fingerprint
 
 ADAPT_MODES = ("lag_low", "lag_full", "mlp_last", "mlp_full")
 SLOT_PARAMETERS = ("mass_offset", "log_gain")
@@ -329,6 +330,15 @@ def _config_hash(config: dict) -> str:
     return hashlib.sha1(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest()[:10]
 
 
+def _cache_key(config: dict) -> str:
+    """Config hash including the oracle source fingerprint, so edited code never reuses stale cells.
+
+    Caches written before 2026-10-19 used ``_config_hash(config)`` alone.
+    """
+
+    return _config_hash({**config, "_code": source_fingerprint()})
+
+
 class _Cache:
     """Resumable store for pretrained weights and finished adaptation cells."""
 
@@ -338,10 +348,10 @@ class _Cache:
         self.cells: dict[str, dict] = {}
         if root is None:
             return
-        self.pretrain_root = root / "pretrained" / _config_hash(pretrain_config)
+        self.pretrain_root = root / "pretrained" / _cache_key(pretrain_config)
         self.pretrain_root.mkdir(parents=True, exist_ok=True)
         (self.pretrain_root / "config.json").write_text(json.dumps(pretrain_config, indent=2, sort_keys=True, default=str))
-        self.root = root / _config_hash(config)
+        self.root = root / _cache_key(config)
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True, default=str))
         cells_path = self.root / "cells.json"

@@ -13,6 +13,8 @@ import numpy as np
 
 from data.sequence_dataset import index_episode_files, split_episode_files
 from data.trajectory import load_trajectory_npz
+from research import ledger
+from research.provenance import RunContext, data_fingerprints, package_versions, source_fingerprint
 
 DEFAULT_RESULTS_ROOT = Path("runs/oracles")
 
@@ -56,7 +58,13 @@ class OracleResult:
         passed = None if any(v is None for v in values) else all(values)
         return {"checks": checks, "passed": passed}
 
-    def write(self, root: Path = DEFAULT_RESULTS_ROOT) -> Path:
+    def write(
+        self, root: Path = DEFAULT_RESULTS_ROOT, *, run: RunContext | None = None,
+        ledger_path: Path | None = ledger.LEDGER_PATH,
+    ) -> Path:
+        """Write the JSON record; with ``run`` (from ``research.provenance.begin_run``) also
+        record its provenance and append a line to the committed ledger."""
+
         out_dir = root / self.name
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -72,6 +80,14 @@ class OracleResult:
             "verdict": self.verdict(),
             "notes": self.notes,
         }
+        if run is not None:
+            payload["experiment"] = run.experiment
+            payload["provenance"] = {
+                **run.to_dict(),
+                "versions": package_versions(),
+                "code": source_fingerprint(),
+                "data": data_fingerprints(self.config),
+            }
         text = json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n"
         # Parallel seeds can finish in the same second: never overwrite an existing result.
         suffix = 0
@@ -84,6 +100,8 @@ class OracleResult:
             except FileExistsError:
                 suffix += 1
         (out_dir / "latest.json").write_text(text)
+        if run is not None and ledger_path is not None:
+            ledger.append(ledger.entry_for(path, payload), ledger_path)
         return path
 
     def summary(self) -> str:
