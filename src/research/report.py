@@ -2,7 +2,7 @@
 
 Runs are grouped into *conditions*: identical configs once per-seed keys
 (``seed``, and outputs that some oracles store in their config, such as
-``recipes``) are removed. Per (condition, seed) only the latest run counts;
+``recipes`` or a per-seed model ``cache`` key) are removed. Per (condition, seed) only the latest run counts;
 earlier ones are listed as superseded. Metric patterns may contain
 ``{shift}``, expanded over each run's ``config["shifts"]``, and a ratio
 ``a / b`` of two metric names, computed per seed before averaging.
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-PER_SEED_KEYS = ("seed", "recipes")
+PER_SEED_KEYS = ("seed", "recipes", "cache")
 
 
 @dataclass
@@ -163,6 +163,8 @@ def markdown(conditions: Sequence[Condition], patterns: Sequence[str]) -> str:
             lines.append("Superseded: " + ", ".join(f"`{p.parent.name}/{p.stem}`" for p in condition.superseded))
         lines += ["", "| metric | mean ± std (n) | per seed |", "|---|---|---|"]
         for name, stats in summarize(condition, patterns).items():
+            if stats["n"] == 0:  # the metric is not one this condition's runs report
+                continue
             per_seed = " / ".join(_fmt(v) for v in stats["values"].values())
             lines.append(f"| `{name}` | {_fmt(stats['mean'])} ± {_fmt(stats['std'])} ({stats['n']}) | {per_seed} |")
         blocks.append("\n".join(lines))
