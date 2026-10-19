@@ -13,10 +13,10 @@ dependencies = [
     "imageio>=2.34",
     "imageio-ffmpeg>=0.5",
     "matplotlib>=3.8",
-    "numpy>=1.26",
+    "numpy>=2.0",
     "pillow>=10",
     "rich>=13.7",
-    "torch>=2.2",
+    "torch>=2.11",
 ]
 
 [project.optional-dependencies]

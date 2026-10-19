@@ -42,8 +42,17 @@ def compute_mechanics_world_model_loss(
     kl_free_nats_nuisance: float = 3.0,
     reward_weight: float = 0.0,
     imagined_reward_weight: float = 0.0,
+    kl_mech_scale: float = 1.0,
+    latent_dynamics_weight: float = 0.0,
+    keypoint_consistency_weight: float = 0.0,
 ) -> dict[str, torch.Tensor]:
     """Compute the mechanics world-model composite loss.
+
+    ``kl_mech_scale`` multiplies the ``q`` / ``q̇`` KL branches (0 makes the
+    mechanics coordinate effectively deterministic, as in KeyCLD / Jaques et
+    al., while the dynamics are trained by the latent and imagination
+    losses). ``latent_dynamics_weight`` and ``keypoint_consistency_weight``
+    weight the corresponding model outputs (they must have been computed).
 
     Gradients flow through ``total_loss``; every other entry is either a
     weighted or a diagnostic tensor.
@@ -100,8 +109,22 @@ def compute_mechanics_world_model_loss(
         kl_free_nats_mech=kl_free_nats_mech,
         kl_free_nats_nuisance=kl_free_nats_nuisance,
     )
-    kl_loss = kl_parts["kl_loss"]
+    if kl_mech_scale < 0.0:
+        raise ValueError("kl_mech_scale must be >= 0")
+    kl_loss = (
+        kl_mech_scale * (kl_parts["kl_q_loss"] + kl_parts["kl_qdot_loss"])
+        + kl_parts["kl_z_loss"]
+    )
     weighted_kl_loss = kl_weight * kl_loss
+
+    latent_dynamics_loss = _optional_output_loss(
+        outputs.latent_dynamics_loss, latent_dynamics_weight, "latent_dynamics", zero,
+    )
+    keypoint_consistency_loss = _optional_output_loss(
+        outputs.keypoint_consistency_loss, keypoint_consistency_weight, "keypoint_consistency", zero,
+    )
+    weighted_latent_dynamics_loss = latent_dynamics_weight * latent_dynamics_loss
+    weighted_keypoint_consistency_loss = keypoint_consistency_weight * keypoint_consistency_loss
 
     reward_loss, imagined_reward_loss = _reward_losses(
         outputs=outputs,
@@ -121,6 +144,8 @@ def compute_mechanics_world_model_loss(
         + weighted_kl_loss
         + weighted_reward_loss
         + weighted_imagined_reward_loss
+        + weighted_latent_dynamics_loss
+        + weighted_keypoint_consistency_loss
     )
 
     losses: dict[str, torch.Tensor] = {
@@ -141,6 +166,10 @@ def compute_mechanics_world_model_loss(
         "weighted_reward_loss": weighted_reward_loss,
         "imagined_reward_loss": imagined_reward_loss,
         "weighted_imagined_reward_loss": weighted_imagined_reward_loss,
+        "latent_dynamics_loss": latent_dynamics_loss,
+        "weighted_latent_dynamics_loss": weighted_latent_dynamics_loss,
+        "keypoint_consistency_loss": keypoint_consistency_loss,
+        "weighted_keypoint_consistency_loss": weighted_keypoint_consistency_loss,
     }
     for key, value in kl_parts.items():
         if key == "kl_loss":
@@ -199,7 +228,7 @@ def compute_factored_kl(
     )
     kl_loss = q_parts["kl_loss"] + qdot_parts["kl_loss"] + z_parts["kl_loss"]
     # Diagnostic scalars for triaging the z-channel phase transition observed
-    # at step ~300 (see docs/current_status.md). Split kl_z by the t=0 anchor
+    # at step ~300 (see docs/archive/status_history_2026-04_to_2026-10-19.md). Split kl_z by the t=0 anchor
     # term (N(0, sigma_p) initial prior) vs the AR(1) transition terms
     # (t>=1); track posterior/prior magnitudes so we can tell whether the
     # encoder's z_mean drifts gradually (story A: weak-prior / over-capacity)
@@ -310,6 +339,20 @@ def _balanced_kl(
         "kl_raw": kl_raw,
         "kl_free_nats_active": free_nats_active,
     }
+
+
+def _optional_output_loss(
+    value: torch.Tensor | None, weight: float, name: str, zero: torch.Tensor,
+) -> torch.Tensor:
+    """Return a model-computed loss term, or zero; reject inconsistent settings."""
+
+    if weight < 0.0:
+        raise ValueError(f"{name}_weight must be >= 0")
+    if value is None:
+        if weight > 0.0:
+            raise ValueError(f"{name}_weight > 0 but the model did not compute {name}_loss")
+        return zero
+    return value
 
 
 def _foreground_mse(

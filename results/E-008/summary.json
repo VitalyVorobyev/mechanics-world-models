@@ -1,0 +1,1075 @@
+{
+  "conditions": [
+    {
+      "config": {
+        "arm": "true",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": null,
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.21048152680136317,
+          "n": 5,
+          "std": 0.013736168819159065,
+          "values": {
+            "0": 0.18816858955762356,
+            "1": 0.21197918162649781,
+            "2": 0.2255766940222992,
+            "3": 0.21106175276934025,
+            "4": 0.21562141603105506
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.2191107358884148,
+          "n": 5,
+          "std": 0.02242439645136856,
+          "values": {
+            "0": 0.1835502259740152,
+            "1": 0.210895396957464,
+            "2": 0.23886942709470682,
+            "3": 0.23059264735808974,
+            "4": 0.23164598205779824
+          }
+        },
+        "return_mean": {
+          "mean": 839.7475605707903,
+          "n": 5,
+          "std": 3.9490333498629497,
+          "values": {
+            "0": 841.2586004391658,
+            "1": 844.3151210107159,
+            "2": 833.4854632725369,
+            "3": 839.8774508517265,
+            "4": 839.8011672798068
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-113017",
+        "1": "camera_control/20261019-113108",
+        "2": "camera_control/20261019-113200",
+        "3": "camera_control/20261019-113251",
+        "4": "camera_control/20261019-113341"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/84c9864c6a/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.2126707986891822,
+          "n": 5,
+          "std": 0.011423620135946194,
+          "values": {
+            "0": 0.20013028527833548,
+            "1": 0.22868001474316502,
+            "2": 0.20409443202525007,
+            "3": 0.2185290770784749,
+            "4": 0.21192018432068555
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.22192349682249296,
+          "n": 5,
+          "std": 0.01299996453912299,
+          "values": {
+            "0": 0.21956503182129,
+            "1": 0.23836242145805628,
+            "2": 0.20418611333611844,
+            "3": 0.23003265905840836,
+            "4": 0.21747125843859177
+          }
+        },
+        "return_mean": {
+          "mean": 838.8445253582419,
+          "n": 5,
+          "std": 3.01051067405766,
+          "values": {
+            "0": 843.7114702850733,
+            "1": 837.2576823429395,
+            "2": 838.3714239401568,
+            "3": 839.1562544783314,
+            "4": 835.7257957447085
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-121608",
+        "1": "camera_control/20261019-121840",
+        "2": "camera_control/20261019-122112",
+        "3": "camera_control/20261019-122344",
+        "4": "camera_control/20261019-122618"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/74b95c49c7/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.21389441282990118,
+          "n": 5,
+          "std": 0.011736477764659473,
+          "values": {
+            "0": 0.22562179548637346,
+            "1": 0.2243138404622687,
+            "2": 0.21615027573448167,
+            "3": 0.20068077237880377,
+            "4": 0.20270538008757827
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.22261479120929312,
+          "n": 5,
+          "std": 0.013854036582322555,
+          "values": {
+            "0": 0.23954625863156448,
+            "1": 0.23298909597575868,
+            "2": 0.22218697590453831,
+            "3": 0.2116295060014689,
+            "4": 0.20672211953313507
+          }
+        },
+        "return_mean": {
+          "mean": 838.5664611549435,
+          "n": 5,
+          "std": 4.327069513252069,
+          "values": {
+            "0": 843.4711655026904,
+            "1": 842.4718205608218,
+            "2": 835.5456241921624,
+            "3": 837.8744752914198,
+            "4": 833.4692202276229
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-122850",
+        "1": "camera_control/20261019-123121",
+        "2": "camera_control/20261019-123356",
+        "3": "camera_control/20261019-123628",
+        "4": "camera_control/20261019-123859"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/c3f4bae45c/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.21637323754180984,
+          "n": 5,
+          "std": 0.025550734224672706,
+          "values": {
+            "0": 0.18565987459960415,
+            "1": 0.21356630109187263,
+            "2": 0.256676408563691,
+            "3": 0.21551372333256447,
+            "4": 0.21044988012131696
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.22698314110486129,
+          "n": 5,
+          "std": 0.022226439246389736,
+          "values": {
+            "0": 0.19901367098319336,
+            "1": 0.2192658736966794,
+            "2": 0.259500853040094,
+            "3": 0.22257649458008916,
+            "4": 0.23455881322425054
+          }
+        },
+        "return_mean": {
+          "mean": 839.8852662944622,
+          "n": 5,
+          "std": 4.355263330427851,
+          "values": {
+            "0": 842.3091957183246,
+            "1": 845.8201101884445,
+            "2": 835.5522248437575,
+            "3": 839.8594788778483,
+            "4": 835.8853218439364
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-124131",
+        "1": "camera_control/20261019-124406",
+        "2": "camera_control/20261019-124639",
+        "3": "camera_control/20261019-124912",
+        "4": "camera_control/20261019-125148"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/2feeb78153/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.23046986728122923,
+          "n": 5,
+          "std": 0.010408839553107868,
+          "values": {
+            "0": 0.22602373525313252,
+            "1": 0.2334490497312945,
+            "2": 0.24593292094142558,
+            "3": 0.22928905909139696,
+            "4": 0.2176545713888965
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.23941643157700138,
+          "n": 5,
+          "std": 0.009089825342223874,
+          "values": {
+            "0": 0.23756478388678642,
+            "1": 0.24230440045224433,
+            "2": 0.24899559592131723,
+            "3": 0.24334519463347806,
+            "4": 0.22487218299118084
+          }
+        },
+        "return_mean": {
+          "mean": 832.4522987371718,
+          "n": 5,
+          "std": 3.3917415264722486,
+          "values": {
+            "0": 837.2052459124438,
+            "1": 833.9373231232872,
+            "2": 828.1903908920144,
+            "3": 830.7214460172783,
+            "4": 832.2070877408354
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-125214",
+        "1": "camera_control/20261019-125240",
+        "2": "camera_control/20261019-125305",
+        "3": "camera_control/20261019-125331",
+        "4": "camera_control/20261019-125358"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/7f333f4dc8/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.2193013840741073,
+          "n": 5,
+          "std": 0.016573149457457994,
+          "values": {
+            "0": 0.2331048460315659,
+            "1": 0.19302889936640844,
+            "2": 0.2336774751058015,
+            "3": 0.22051668244916636,
+            "4": 0.21617901741759435
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.2294463578728978,
+          "n": 5,
+          "std": 0.020806433652547154,
+          "values": {
+            "0": 0.24637205179508131,
+            "1": 0.1948724775227042,
+            "2": 0.24495318950583106,
+            "3": 0.2323937186032211,
+            "4": 0.2286403519376512
+          }
+        },
+        "return_mean": {
+          "mean": 830.5186898335614,
+          "n": 5,
+          "std": 3.4320075163592882,
+          "values": {
+            "0": 832.0267225486436,
+            "1": 832.7481335147229,
+            "2": 826.4763333102592,
+            "3": 834.0977170012468,
+            "4": 827.2445427929349
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-125424",
+        "1": "camera_control/20261019-125450",
+        "2": "camera_control/20261019-125517",
+        "3": "camera_control/20261019-125543",
+        "4": "camera_control/20261019-125608"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/b3dc3eea1e/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.22351559680078376,
+          "n": 5,
+          "std": 0.008852781720225404,
+          "values": {
+            "0": 0.21426031783153365,
+            "1": 0.23482537480053078,
+            "2": 0.22148709547324363,
+            "3": 0.23042360054883937,
+            "4": 0.21658159534977145
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.23465448579079426,
+          "n": 5,
+          "std": 0.014764887884662525,
+          "values": {
+            "0": 0.22231962178547512,
+            "1": 0.2566813069144238,
+            "2": 0.22414795332213838,
+            "3": 0.24293447780211824,
+            "4": 0.22718906912981565
+          }
+        },
+        "return_mean": {
+          "mean": 830.9940114858197,
+          "n": 5,
+          "std": 3.841068875644123,
+          "values": {
+            "0": 836.4091781393942,
+            "1": 832.350859035682,
+            "2": 826.4460943090661,
+            "3": 831.413844304624,
+            "4": 828.3500816403321
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-125634",
+        "1": "camera_control/20261019-125659",
+        "2": "camera_control/20261019-125724",
+        "3": "camera_control/20261019-125749",
+        "4": "camera_control/20261019-125814"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "fd",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/84c9864c6a/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.22440622816125466,
+          "n": 5,
+          "std": 0.006329880752264759,
+          "values": {
+            "0": 0.22142246585919995,
+            "1": 0.23541234885334417,
+            "2": 0.22271642213861045,
+            "3": 0.21932605842637537,
+            "4": 0.22315384552874346
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.23526735634426948,
+          "n": 5,
+          "std": 0.006577867478435001,
+          "values": {
+            "0": 0.24372613131614315,
+            "1": 0.23833835346756904,
+            "2": 0.22586548765003336,
+            "3": 0.23335713532680313,
+            "4": 0.23504967396079887
+          }
+        },
+        "return_mean": {
+          "mean": 787.7461557897299,
+          "n": 5,
+          "std": 22.338220510944524,
+          "values": {
+            "0": 793.7672898027058,
+            "1": 782.6769105343678,
+            "2": 808.9408319271697,
+            "3": 751.7772551009871,
+            "4": 801.568491583419
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-130003",
+        "1": "camera_control/20261019-130151",
+        "2": "camera_control/20261019-130340",
+        "3": "camera_control/20261019-130528",
+        "4": "camera_control/20261019-130730"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "arm": "learned",
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84
+        },
+        "env": "cartpole-swingup",
+        "estimator": {
+          "gate": [
+            0.15,
+            0.25
+          ],
+          "sigma": [
+            0.02,
+            0.03
+          ],
+          "window": 12
+        },
+        "model_round": "runs/oracles/learned_control/cache/bbc9fa6dd4/round3",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_noise": null,
+        "pose_source": "camera",
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt"
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.21629113139891099,
+          "n": 1,
+          "std": NaN,
+          "values": {
+            "0": 0.21629113139891099
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.22929701884947834,
+          "n": 1,
+          "std": NaN,
+          "values": {
+            "0": 0.22929701884947834
+          }
+        },
+        "return_mean": {
+          "mean": 837.745028813023,
+          "n": 1,
+          "std": NaN,
+          "values": {
+            "0": 837.745028813023
+          }
+        }
+      },
+      "runs": {
+        "0": "camera_control/20261019-145151"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "batch_size": 64,
+        "camera": {
+          "fovy_deg": 71.88422374276468,
+          "image_size": 84,
+          "pixels_per_metre": 14.482758620689658
+        },
+        "device": "mps",
+        "lr": 0.001,
+        "steps": 20000,
+        "train_frames": 50000,
+        "val_frames": 5000
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": 0.1816155836320519,
+          "n": 1,
+          "std": NaN,
+          "values": {
+            "0": 0.1816155836320519
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": 0.18638985304706177,
+          "n": 1,
+          "std": NaN,
+          "values": {
+            "0": 0.18638985304706177
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "keypoint_reader/20261019-111217"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "estimator_window": 12,
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_source": "camera",
+        "random_episodes": 60,
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt",
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 699.6171909659578,
+          "n": 3,
+          "std": 194.15333307165304,
+          "values": {
+            "0": 834.4817026759787,
+            "1": 477.09080448781424,
+            "2": 787.2790657340804
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-115724",
+        "1": "learned_control/20261019-123509-1",
+        "2": "learned_control/20261019-123509"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "estimator_window": 12,
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_source": "camera",
+        "random_episodes": 60,
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt",
+        "round": 1,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 828.1519367741095,
+          "n": 3,
+          "std": 21.118700573258963,
+          "values": {
+            "0": 804.5664818605986,
+            "1": 845.3106917461716,
+            "2": 834.5786367155581
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-124342",
+        "1": "learned_control/20261019-131919",
+        "2": "learned_control/20261019-131914"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "estimator_window": 12,
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_source": "camera",
+        "random_episodes": 60,
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt",
+        "round": 2,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 836.567776783391,
+          "n": 3,
+          "std": 8.245449402131733,
+          "values": {
+            "0": 829.4413339142338,
+            "1": 845.5988858235805,
+            "2": 834.6631106123587
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-133045",
+        "1": "learned_control/20261019-140414",
+        "2": "learned_control/20261019-140407"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "estimator_window": 12,
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "pose_source": "camera",
+        "random_episodes": 60,
+        "reader": "runs/oracles/keypoint_reader/models/20261019-111217.pt",
+        "round": 3,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "pose_error.theta_median_deg": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pose_error.theta_median_deg_upright": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 835.8241440590328,
+          "n": 3,
+          "std": 9.131921054067089,
+          "values": {
+            "0": 828.8146416584732,
+            "1": 846.1510752049111,
+            "2": 832.5067153137143
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-141842",
+        "1": "learned_control/20261019-144851",
+        "2": "learned_control/20261019-144836"
+      },
+      "superseded": []
+    }
+  ],
+  "patterns": [
+    "return_mean",
+    "pose_error.theta_median_deg",
+    "pose_error.theta_median_deg_upright"
+  ]
+}

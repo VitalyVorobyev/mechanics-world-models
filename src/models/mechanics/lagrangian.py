@@ -17,10 +17,17 @@ coordinate; for cartpole we expect ``d = 2``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+from models.mechanics.coordinates import (
+    coordinate_feature_size,
+    embed_coordinates,
+    validate_angle_dims,
+)
 
 
 def _mlp(
@@ -46,7 +53,7 @@ def _bounded_input(x: torch.Tensor, scale: float) -> torch.Tensor:
     outputs; the dynamics MLPs (mass, potential, dissipation, actuation) are
     untrained SiLU stacks. A tail-of-distribution sample then drives an
     unbounded activation pattern, gradients explode, and AdamW's second-moment
-    estimates get poisoned — see ``docs/current_status.md`` for the observed
+    estimates get poisoned — see ``docs/archive/status_history_2026-04_to_2026-10-19.md`` for the observed
     trace. Squashing each MLP input with ``tanh`` keeps the dynamics-network
     domain compact independent of the encoder's scale, without changing the
     Euler-Lagrange form (the transformation is a smooth, invertible change of
@@ -80,6 +87,7 @@ class MassMatrix(nn.Module):
         hidden_layers: int = 2,
         eps: float = 1e-2,
         input_scale: float = 5.0,
+        angle_dims: Sequence[int] = (),
     ) -> None:
         super().__init__()
         if input_scale <= 0.0:
@@ -87,6 +95,8 @@ class MassMatrix(nn.Module):
         self.q_dim = q_dim
         self.eps = eps
         self.input_scale = input_scale
+        self.angle_dims = validate_angle_dims(angle_dims, q_dim)
+        self.feature_size = coordinate_feature_size(q_dim, self.angle_dims)
         n_tri = q_dim * (q_dim + 1) // 2
         # ``_tri_indices`` and ``_diag_mask`` are deterministic constants of
         # ``q_dim`` but we register them as buffers so ``model.to(device)``
@@ -99,7 +109,7 @@ class MassMatrix(nn.Module):
             "_diag_mask", tri_indices[0] == tri_indices[1], persistent=False,
         )
         self.net = _mlp(
-            input_size=q_dim,
+            input_size=self.feature_size,
             output_size=n_tri,
             hidden_size=hidden_size,
             hidden_layers=hidden_layers,
@@ -111,8 +121,8 @@ class MassMatrix(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        q_bounded = _bounded_input(q, self.input_scale)
-        flat = q_bounded.reshape(-1, self.q_dim)
+        q_features = embed_coordinates(q, self.angle_dims, linear_scale=self.input_scale)
+        flat = q_features.reshape(-1, self.feature_size)
         raw = self.net(flat)
         activated = torch.where(self._diag_mask, F.softplus(raw) + self.eps, raw)
         lower = q.new_zeros(flat.shape[0], self.q_dim, self.q_dim)
@@ -132,14 +142,17 @@ class Potential(nn.Module):
         hidden_size: int = 64,
         hidden_layers: int = 2,
         input_scale: float = 5.0,
+        angle_dims: Sequence[int] = (),
     ) -> None:
         super().__init__()
         if input_scale <= 0.0:
             raise ValueError("input_scale must be > 0")
         self.q_dim = q_dim
         self.input_scale = input_scale
+        self.angle_dims = validate_angle_dims(angle_dims, q_dim)
+        self.feature_size = coordinate_feature_size(q_dim, self.angle_dims)
         self.net = _mlp(
-            input_size=q_dim,
+            input_size=self.feature_size,
             output_size=1,
             hidden_size=hidden_size,
             hidden_layers=hidden_layers,
@@ -151,8 +164,8 @@ class Potential(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        q_bounded = _bounded_input(q, self.input_scale)
-        flat = q_bounded.reshape(-1, self.q_dim)
+        q_features = embed_coordinates(q, self.angle_dims, linear_scale=self.input_scale)
+        flat = q_features.reshape(-1, self.feature_size)
         return self.net(flat).reshape(*batch_shape)
 
 
@@ -227,6 +240,12 @@ class Actuation(nn.Module):
     """Learned input map ``B(q)`` of shape ``[d, a]``.
 
     Generalized force injected into the Euler-Lagrange equation is ``B(q) u``.
+
+    ``actuated_dims`` (default: all) zeroes the rows of unactuated
+    coordinates. Without it, ``M`` is not identified: only ``M^{-1} B`` is,
+    and a learned ``B`` can drive an unactuated coordinate directly to mimic
+    its inertial coupling (seen on cartpole: the pole row of ``B`` absorbed
+    the cart-pole coupling and the learned ``M[1, 1]`` grew about 70×).
     """
 
     def __init__(
@@ -236,6 +255,8 @@ class Actuation(nn.Module):
         hidden_size: int = 64,
         hidden_layers: int = 2,
         input_scale: float = 5.0,
+        angle_dims: Sequence[int] = (),
+        actuated_dims: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
         if input_scale <= 0.0:
@@ -243,8 +264,19 @@ class Actuation(nn.Module):
         self.q_dim = q_dim
         self.action_dim = action_dim
         self.input_scale = input_scale
+        self.angle_dims = validate_angle_dims(angle_dims, q_dim)
+        self.feature_size = coordinate_feature_size(q_dim, self.angle_dims)
+        row_mask = torch.ones(q_dim)
+        if actuated_dims is not None:
+            dims = validate_angle_dims(actuated_dims, q_dim)
+            if not dims:
+                raise ValueError("actuated_dims must name at least one coordinate")
+            row_mask = torch.zeros(q_dim)
+            row_mask[list(dims)] = 1.0
+        self.actuated_dims = None if actuated_dims is None else tuple(sorted(actuated_dims))
+        self.register_buffer("row_mask", row_mask.view(q_dim, 1), persistent=False)
         self.net = _mlp(
-            input_size=q_dim,
+            input_size=self.feature_size,
             output_size=q_dim * action_dim,
             hidden_size=hidden_size,
             hidden_layers=hidden_layers,
@@ -256,10 +288,96 @@ class Actuation(nn.Module):
         if q.shape[-1] != self.q_dim:
             raise ValueError(f"expected last dim={self.q_dim}, got {q.shape[-1]}")
         batch_shape = q.shape[:-1]
-        q_bounded = _bounded_input(q, self.input_scale)
-        flat = q_bounded.reshape(-1, self.q_dim)
+        q_features = embed_coordinates(q, self.angle_dims, linear_scale=self.input_scale)
+        flat = q_features.reshape(-1, self.feature_size)
         raw = self.net(flat)
-        return raw.reshape(*batch_shape, self.q_dim, self.action_dim)
+        return raw.reshape(*batch_shape, self.q_dim, self.action_dim) * self.row_mask
+
+
+class LinearDissipation(nn.Module):
+    """Constant PSD linear damping: generalized force ``F_d = C q̇``.
+
+    Dissipated power ``q̇^T C q̇ >= 0`` holds exactly for every ``q̇``. The
+    velocity-dependent ``Dissipation`` above does not guarantee this:
+    ``q̇^T dD/dq̇`` picks up ``q̇^T (dC/dq̇) q̇`` terms and the ``tanh`` input
+    bound, so it can inject energy. Use this form when testing claims about
+    dissipation (H3); add non-linear friction only if the data demands it.
+    """
+
+    def __init__(self, q_dim: int, eps: float = 1e-4, input_scale: float = 20.0) -> None:
+        super().__init__()
+        self.q_dim = q_dim
+        self.eps = eps
+        # ``input_scale`` is read by ``forward_acceleration`` to bound q̇ in
+        # the kinetic quadratic forms; kept for interface parity.
+        self.input_scale = input_scale
+        tri_indices = torch.tril_indices(q_dim, q_dim)
+        self.register_buffer("_tri_indices", tri_indices, persistent=False)
+        self.register_buffer(
+            "_diag_mask", tri_indices[0] == tri_indices[1], persistent=False,
+        )
+        self.raw = nn.Parameter(torch.full((tri_indices.shape[1],), -2.0))
+
+    def damping_matrix(self) -> torch.Tensor:
+        """Return the constant PSD damping matrix ``C`` shaped ``[d, d]``."""
+
+        activated = torch.where(self._diag_mask, F.softplus(self.raw) + self.eps, self.raw)
+        lower = self.raw.new_zeros(self.q_dim, self.q_dim)
+        lower[self._tri_indices[0], self._tri_indices[1]] = activated
+        return lower @ lower.transpose(-1, -2)
+
+    def force(self, qdot: torch.Tensor) -> torch.Tensor:
+        """Generalized damping force ``C q̇`` shaped like ``qdot``."""
+
+        return torch.einsum("ij,...j->...i", self.damping_matrix(), qdot)
+
+
+class MLPDynamics(nn.Module):
+    """Unstructured baseline: ``q̈ = MLP(q, q̇, u)`` with the same integrator.
+
+    Shares the encoder, decoder bottleneck and semi-implicit Euler step with
+    the Lagrangian model, so comparing the two isolates the Euler-Lagrange
+    structure itself.
+    """
+
+    def __init__(
+        self,
+        q_dim: int,
+        action_dim: int,
+        hidden_size: int = 128,
+        hidden_layers: int = 2,
+        q_input_scale: float = 5.0,
+        qdot_input_scale: float = 20.0,
+        angle_dims: Sequence[int] = (),
+    ) -> None:
+        super().__init__()
+        self.q_dim = q_dim
+        self.action_dim = action_dim
+        self.q_input_scale = q_input_scale
+        self.qdot_input_scale = qdot_input_scale
+        self.angle_dims = validate_angle_dims(angle_dims, q_dim)
+        input_size = coordinate_feature_size(q_dim, self.angle_dims) + q_dim + action_dim
+        self.net = _mlp(
+            input_size=input_size,
+            output_size=q_dim,
+            hidden_size=hidden_size,
+            hidden_layers=hidden_layers,
+        )
+
+    def acceleration(
+        self, q: torch.Tensor, qdot: torch.Tensor, u: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return ``q̈`` shaped like ``q``."""
+
+        features = torch.cat(
+            [
+                embed_coordinates(q, self.angle_dims, linear_scale=self.q_input_scale),
+                _bounded_input(qdot, self.qdot_input_scale),
+                u,
+            ],
+            dim=-1,
+        )
+        return self.net(features)
 
 
 @dataclass(frozen=True)
@@ -268,12 +386,20 @@ class LagrangianDynamics:
 
     mass_matrix: MassMatrix
     potential: Potential
-    dissipation: Dissipation | None
+    dissipation: Dissipation | LinearDissipation | None
     actuation: Actuation
+
+    @property
+    def q_dim(self) -> int:
+        return self.mass_matrix.q_dim
+
+    @property
+    def action_dim(self) -> int:
+        return self.actuation.action_dim
 
 
 def forward_acceleration(
-    dynamics: LagrangianDynamics,
+    dynamics: LagrangianDynamics | MLPDynamics,
     q: torch.Tensor,
     qdot: torch.Tensor,
     u: torch.Tensor,
@@ -304,11 +430,13 @@ def forward_acceleration(
 
     if q.shape != qdot.shape:
         raise ValueError(f"q and qdot shapes must match; got {q.shape} vs {qdot.shape}")
-    if u.shape[:-1] != q.shape[:-1] or u.shape[-1] != dynamics.actuation.action_dim:
+    if u.shape[:-1] != q.shape[:-1] or u.shape[-1] != dynamics.action_dim:
         raise ValueError(
             f"u must broadcast-align with q batch dims and have last dim="
-            f"{dynamics.actuation.action_dim}; got u.shape={u.shape}",
+            f"{dynamics.action_dim}; got u.shape={u.shape}",
         )
+    if isinstance(dynamics, MLPDynamics):
+        return dynamics.acceleration(q, qdot, u)
 
     needs_outer_grad = torch.is_grad_enabled() and (
         q.requires_grad or qdot.requires_grad or any(
@@ -354,7 +482,9 @@ def forward_acceleration(
             m_dot_qdot_components.append((grad_component * qdot_b).sum(dim=-1))
         m_dot_qdot = torch.stack(m_dot_qdot_components, dim=-1)
 
-        if dynamics.dissipation is not None:
+        if isinstance(dynamics.dissipation, LinearDissipation):
+            dD_dqdot = dynamics.dissipation.force(qdot)
+        elif dynamics.dissipation is not None:
             qdot_in = qdot if qdot.requires_grad else qdot.clone().requires_grad_(True)
             dissipation_value = dynamics.dissipation(qdot_in).sum()
             (dD_dqdot,) = torch.autograd.grad(

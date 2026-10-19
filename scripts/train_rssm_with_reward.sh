@@ -1,0 +1,29 @@
+.venv/bin/train-rssm \
+    --dataset-dir data/cartpole-swingup-random-100k-v2 \
+    --checkpoint-dir checkpoints/rssm-phase0-reward \
+    --auto-resume \
+    --sequence-length 32 \
+    --batch-size 32 \
+    --epochs 20 \
+    --learning-rate 3e-4 \
+    --warmup-steps 1000 \
+    --lr-schedule cosine \
+    --kl-weight 1.0 \
+    --kl-balance-alpha 0.8 \
+    --kl-free-nats 0.5 \
+    --reconstruction-weight 0.0 \
+    --foreground-reconstruction-weight 2.0 \
+    --foreground-mask-floor 0.02 \
+    --foreground-mask-kernel-size 7 \
+    --imagination-context-steps 4 \
+    --imagination-horizon 12 \
+    --foreground-imagination-reconstruction-weight 2.0 \
+    --val-open-loop-every-steps 500 \
+    --val-open-loop-warmup 4 \
+    --val-open-loop-horizons "1,5,10,20" \
+    --val-open-loop-sequences 32 \
+    --device auto \
+    --log-every-steps 100 \
+    --reward-head \
+    --reward-weight 1.0 \
+    --imagined-reward-weight 1.0

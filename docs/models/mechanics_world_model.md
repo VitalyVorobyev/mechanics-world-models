@@ -156,12 +156,14 @@ real meaning:
 **CEM / online MPC.** Because `q̇` is derived by finite differencing,
 the encoder requires **two consecutive frames** to produce a velocity;
 `initial_posterior` and `posterior_step` accept `[B, T ≥ 2, C, H, W]`
-and return `(q, q̇, z)` at the latest timestep. The existing warmup in
-`eval-control` (K_ctx ≥ 4) already satisfies this. `imagine_rollout_
-features` rolls forward under a candidate action sequence and returns
-decoded features suitable for the reward head. The planner does not
-know or need to know that the latent is factored — it just sees a
-dense feature tensor and a reward head.
+and return `(q, q̇, z)` at the latest timestep. `imagine_rollout_features`
+rolls forward under a candidate action sequence and returns
+`reward_features` for the reward head. **Not wired up yet:** `eval-control`
+only builds a `VisualWorldModel`, and `CEMPlanner` assumes the RSSM's
+`(h, z)` state with `hidden_size` / `latent_size` and a single-frame
+`initial_posterior` (`src/eval/eval_control.py`, `src/planning/cem.py`).
+Running B_main through MPC needs a small model-agnostic planner protocol
+first.
 
 ## Architecture and Parameters
 
@@ -176,10 +178,44 @@ Default cartpole training configuration:
 - generalized coordinate dim `d = 2` (cartpole)
 - nuisance dim `k = 4` (kept small — cartpole has near-zero visual
   style variation, and larger `k` triggered a KL blow-up in earlier
-  iterations; see `docs/current_status.md`)
+  iterations; see `docs/archive/status_history_2026-04_to_2026-10-19.md`)
 - shared encoder embedding `E = 256`
-- decoder input dim `2d + k = 8`
-- integrator step `dt = 0.01` s, `n_substeps = 1`
+- decoder input dim `2d + k = 8` (legacy `concat` mode; see options below)
+- integrator step `dt`: resolved from the dataset when `--dt` is omitted
+  (control timestep × action repeat = **0.02 s** for every cartpole dataset
+  in this repo). All April 2026 checkpoints were trained with an explicit
+  `--dt 0.01`, i.e. at half the true frame interval; the model absorbs this
+  by rescaling `V`, `B`, `D`, so pixel prediction is unaffected, but learned
+  velocities and energies are not in physical units. `n_substeps = 1`.
+
+### Configuration options added in the October 2026 review
+
+All default to the legacy behaviour, so old checkpoints load and evaluate
+unchanged. `scripts/train_gate.sh` turns them on together.
+
+| Flag | Values (default first) | Effect |
+|---|---|---|
+| `--nuisance-mode` | `concat`, `style` | `concat`: decoder reads `concat(q, q̇, z)` — on the April checkpoints `z` carries the pose (probe R² ≈ 0.89) and `q` is nearly unused. `style`: decoder renders from the embedded `q` only; `z` is a zero-initialized per-channel gain/offset on the decoder logits (`style_head`), and the reward head reads `(q, q̇)` only. |
+| `--angle-dims` | none, e.g. `1` | Marks `q` dims on `S¹`. The encoder emits an extra column per angle and sets `θ = atan2(extra, raw)`; decoder, reward head, `M`, `V`, `B` see `(cos θ, sin θ)`; finite differences and prior−posterior means wrap to `[−π, π)`. |
+| `--qdot-stencil` | `central`, `backward` | `central` reads `q_{t+1}`, so a prior fed `q̇_{t−1}` already sees the frame it predicts. `backward` (`(q_t − q_{t−1})/dt`) is causal and is exactly the semi-implicit Euler velocity. Pushforward std `sqrt(q_std_t² + q_std_{t−1}²)/dt`, about 2× the central one, so the cold-start `kl_qdot_raw` transient is larger (≈ 450 vs ≈ 175). |
+| `--dynamics-form` | `lagrangian`, `mlp` | `mlp`: unstructured `q̈ = MLP(embed(q), q̇, u)` (`MLPDynamics`) with the same encoder, bottleneck and integrator — the control that isolates the Euler-Lagrange structure. No energy diagnostic. |
+| `--dissipation-form` | `rayleigh_mlp`, `linear` | `linear`: constant PSD `C` with force `C q̇` (`LinearDissipation`), so dissipated power `q̇ᵀ C q̇ ≥ 0` holds exactly. |
+| `--encoder-type` | `conv`, `keypoint` | `keypoint` (cartpole only): `KeypointEncoder` gives spatial-softmax cart and pole-tip keypoints; `x = u_cart`, `θ = atan2(u_tip − u_cart, v_cart − v_tip)`; `q_std` is a learned constant; `z` comes from pooled features (`models/mechanics/keypoints.py`). |
+| `--decoder-type` | `deconv`, `render` | `render` (cartpole only, requires `style`): `GeometricRenderer` places Gaussian blobs for the cart and along the pole analytically from `(x, θ)` (learned cart height and pole length), adds a learned background and coordinate channels, then a small conv net and ×2 upsampling produce the image. From the true pose it reaches held-out foreground MSE 0.0013, against 0.0043 for the deconv decoder (`runs/oracles/decoder_oracle_*`). |
+| `--latent-dynamics-weight`, `--latent-dynamics-horizon` | 0, 6 | Multi-start latent loss: roll `horizon` integrator steps from every frame `t ≥ 1` and regress onto the encoder's (detached) `q_{t+k}` with wrapped angle (`multi_start_latent_loss`). |
+| `--keypoint-consistency-weight` | 0 | Squared distance between encoder keypoints and the renderer's keypoints for the same `q` (fits the renderer's cart height and pole length to the encoder). |
+| `--kl-mech-scale` | 1 | Multiplier on the `q` / `q̇` KL branches; 0 makes `q` effectively deterministic (KeyCLD / Jaques et al. use no KL), and the dynamics are then trained by the latent and imagination losses. |
+
+Two behaviour changes apply regardless of flags (training only; evaluation
+of old checkpoints differs only by the first):
+
+- the open-loop start velocity is a backward difference of the last two
+  context frames (it used to read the first target frame through the central
+  stencil; measured effect on the Phase-3 checkpoint: fg-MSE h10
+  0.00892 → 0.00900);
+- posterior `q̇` *samples* are the finite difference of the `q` samples
+  instead of an independent draw, so the kinematic constraint holds per
+  sample, not only for the means.
 
 ### Encoder (`src/models/mechanics/encoder.py::FactoredEncoder`)
 
@@ -209,7 +245,10 @@ Four small MLPs over `q`:
   symmetric PD by construction.
 - `Potential(q) -> V(q)`: scalar.
 - `Dissipation(qdot) -> D = 0.5 qdotᵀ C(qdot) qdot` with PSD `C` (Cholesky).
-  `dD/d(qdot)` is monotone in damping.
+  Caveat: because `C` depends on `q̇` (and `q̇` is `tanh`-bounded inside
+  `D`), `q̇ᵀ dD/dq̇` is **not** guaranteed non-negative — this form can inject
+  energy. `--dissipation-form linear` (`LinearDissipation`, constant PSD
+  `C`, force `C q̇`) is provably passive and is the one to use for H3.
 - `Actuation(q) -> B(q) ∈ ℝ^{d × a}`: generalized force from action `u`.
 
 Forward dynamics use the **mechanical form** of Euler-Lagrange:
@@ -258,13 +297,17 @@ history to condition on).
 
 ### Decoder
 
-`ImageDecoder` is identical to the RSSM baseline's; it consumes a
-`[B, T, 2d + k]` feature tensor.
+`ImageDecoder` is identical to the RSSM baseline's. In `concat` mode it
+consumes `[B, T, d + |angle_dims| + d + k]` (`2d + k` without angle dims);
+in `style` mode it consumes only the embedded `q` (`d + |angle_dims|`) and
+`z` modulates its logits per channel.
 
 ### Reward Head (optional)
 
 When `--reward-head` is set, a `Linear -> ELU -> Linear -> ELU -> Linear`
-MLP from features to a scalar reward. Required for MPC and the
+MLP from `reward_features` to a scalar reward: `concat(embed(q), q̇, z)` in
+`concat` mode (the research spec says `(q, q̇)` only — the legacy model
+deviates), `concat(embed(q), q̇)` in `style` mode. Required for MPC and the
 research-spec primary metric. Disabled by default.
 
 ## Objective Function
@@ -331,7 +374,7 @@ Default optimizer settings:
 
 The recommended live-training config (from
 `scripts/train_mechanics.sh`, derived by the v2/v3/v4/diag debugging
-iterations documented in `docs/current_status.md`):
+iterations documented in `docs/archive/status_history_2026-04_to_2026-10-19.md`):
 
 ```
 kl_weight                                      = 0.1
@@ -355,17 +398,31 @@ mis-loading state.
 
 ## Diagnostics
 
-`src/eval/probes.py` provides two **non-training** diagnostics:
+`src/eval/probes.py` provides **non-training** diagnostics:
 
-- `fit_linear_probe`: held-out OLS of `encoded_q -> physics_qpos` (and
-  `encoded_qdot -> physics_qvel`). Reports R² per dim and overall.
-  R² > 0.8 is the K2 acceptance gate; values below that suggest
-  factorization collapse.
+- `run_state_probes` (reported as `state_probes` by `eval-mechanics` and
+  `eval-rssm`): linear and MLP probes from each latent block (`q`, `q̇`,
+  `z`, `q_qdot`, `q_z`, `full`; RSSM: `h`, `z`, `full`) onto
+  `[cart x, cos θ, sin θ]` and onto `qvel`, with an **episode-level**
+  train/test split. This is the factorization check: the pose should be
+  recoverable from `q`, not from `z`. The MLP probe tolerates a nonlinear
+  (but informative) chart; the linear one asks for a physical chart.
+- `fit_linear_probe` (legacy `linear_probe` key): OLS of `q -> raw qpos`
+  with a row-level split. The raw hinge angle is unbounded (about −32 to
+  16 rad on the random-policy data), so even a perfect encoder cannot reach
+  R² 0.8 here, and the row split leaks overlapping windows. Kept only for
+  comparability with the April numbers; do not use it as a gate.
 - `compute_learned_energy` + `normalized_energy_drift`:
   `E_learned(t) = T(q_t, qdot_t) + V(q_t)` from the model's mass matrix +
-  potential. With `D = 0` this should be approximately conserved over open-
-  loop rollouts; with `D > 0` it should be monotone-non-increasing on
-  average. Used for H3.
+  potential, as drift relative to `|E(0)|`. It is not compared with the
+  simulator's energy, depends on `V`'s arbitrary additive constant, and
+  with actuation and damping the right check is the power balance
+  `dE/dt = q̇ᵀ B u − q̇ᵀ F_d`, not conservation. Treat it as a relative
+  diagnostic only.
+
+Both evaluators also report `copy_last_frame_mse_h*`, the error of simply
+repeating the last context frame: on the April checkpoints the open-loop
+prediction only ties this baseline at h1.
 
 ## Signals And Failure Modes
 

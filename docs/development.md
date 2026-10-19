@@ -19,7 +19,25 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 
 The project targets Python `>=3.10,<3.13`. In practice, Python 3.12 is the safer
 default today because `dm-control` depends on packages that can be awkward to
-build on Python 3.13 on macOS ARM.
+build on Python 3.13 on macOS ARM (as of October 2026 `labmaze` 1.0.6 still
+ships wheels only up to cp312).
+
+To reproduce the exact environment the April 2026 datasets and checkpoints
+were made with (torch 2.11.0, numpy 2.4.4, dm-control 1.0.38, mujoco 3.6.0),
+install from the lock file instead of resolving fresh:
+
+```bash
+uv pip sync --python .venv/bin/python requirements.lock.txt
+uv pip install --python .venv/bin/python --no-deps -e .
+```
+
+`pyproject.toml` only sets lower bounds, so a fresh install pulls newer
+mujoco / dm-control, which can change physics or rendered pixels relative
+to the stored datasets. New collections record `software_versions` and
+`frame_dt` in every episode file. Upgrade torch on a branch: torch 2.14
+rewrote the MPS linear-algebra kernels, and the repo's MPS workarounds
+(`linalg.inv` instead of `linalg.solve`, per-dim `autograd.grad` instead of
+`jvp`) are guarded only by a source-text test, not by an MPS run.
 
 On Linux or other headless machines, MuJoCo may need an explicit offscreen
 backend:
@@ -278,12 +296,193 @@ Resume from the latest checkpoint:
   --resume-from checkpoints/rssm-cartpole-random-100k/latest.pt
 ```
 
+## Research Bookkeeping (protocol v2)
+
+See [`research_protocol.md`](research_protocol.md). The day-to-day commands:
+
+```bash
+# hygiene check: ledger provenance, pre-registration, claims, charter (also in pytest)
+.venv/bin/python scripts/research/check.py
+
+# new experiment record (status draft); fill the protected sections, commit = registration
+.venv/bin/python scripts/research/new_experiment.py --slug my-test --title "…" --node Q1 --hypotheses H-CTRL
+
+# run an oracle for a registered, approved experiment (refuses a dirty tree)
+.venv/bin/python scripts/oracles/context_oracle.py --experiment E-004 …
+
+# seed-aggregated table into the record + results/E-NNN/summary.json
+.venv/bin/python scripts/research/report.py E-004
+
+# ad-hoc aggregation over any result files (exploration / audits)
+.venv/bin/python scripts/research/report.py --glob 'runs/oracles/context_oracle/2026*.json' \
+    --where 'shifts=["gear_x1.3","gear_x0.5","gear_x2","gear_x3"]' \
+    --metric '{shift}.k1.mlp_ctx.dev_h20 / {shift}.k1.lag_ctx.dev_h20'
+
+# import result files that predate the ledger (idempotent)
+.venv/bin/python scripts/research/import_legacy.py 'runs/oracles/*/2026*.json'
+```
+
+Every oracle CLI accepts `--experiment E-NNN` and `--allow-dirty`. Results
+record the full commit, dirty paths, argv, package versions, data and
+source fingerprints, and append one line to the committed
+`results/ledger.jsonl`. Oracle caches are keyed by the source fingerprint
+of `src/oracles/` and `src/models/mechanics/`. Caches written before
+2026-10-19 used the config hash alone; `export_demo.py` still falls back
+to them.
+
+## Closed-Loop Control (E-006 onward)
+
+`src/control/` holds the swing-up reward in closed form (`reward.py`,
+verified equal to dm_control's), a backend-agnostic MPPI planner
+(`mppi.py`) and the true-model backend (`true_model.py`, batched
+`mujoco.rollout`). One run of `scripts/oracles/control_episode.py` is one
+evaluation episode; it writes a ledgered `OracleResult` plus the trajectory
+(`.npz` next to the JSON).
+
+```bash
+# planner on the true model (about 20-60 s per episode on 4 threads)
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics true --seed 0 \
+    --horizon 50 --samples 512 --noise-std 0.5 --temperature 1.0
+# floors
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics zero --seed 0
+.venv/bin/python scripts/oracles/control_episode.py --experiment E-006 --dynamics random --seed 0
+# table (mean ± sample std over seeds, grouped by config)
+.venv/bin/python scripts/research/report.py E-006
+```
+
+## Oracle Diagnostics (run before end-to-end training)
+
+The oracle ladder from [`research_protocol.md`](research_protocol.md). Each
+script tests one component against simulator ground truth and writes
+`runs/oracles/<name>/<timestamp>.json` (plus `latest.json`) with pass/fail
+criteria and the registry IDs it informs.
+
+```bash
+# Rung 0 (~5 s): how far each physics perturbation moves trajectories
+.venv/bin/python scripts/oracles/intervention_effect.py
+# Rung 1 (~30 s on MPS): decoder from the TRUE pose (render | deconv)
+.venv/bin/python scripts/oracles/decoder_oracle.py --kind render
+# Rung 2 (~1 min): encoder regressing the TRUE pose (keypoint | conv)
+.venv/bin/python scripts/oracles/encoder_oracle.py --kind keypoint
+# Rung 3 ceiling (~3 s): true MuJoCo dynamics under our integrator, with and
+# without rail-contact windows (sets the floor any learned dynamics can reach)
+.venv/bin/python scripts/oracles/dynamics_ceiling.py \
+    --dataset nominal=data/cartpole-swingup-random-100k-v2 \
+    --dataset cart_mass_x2=data/cartpole-ood-cartmass20-15k-v2:body_mass_1=2.0
+# Rung 3 (~40 min CPU per seed): Lagrangian vs MLP on true state + few-shot
+# adaptation, rail-free windows, symmetric adaptation grid
+.venv/bin/collect-cartpole --output-dir data/cartpole-ood-cartmass20-15k-v2 \
+    --total-frames 15000 --seed 12 --action-repeat 2 --physics-scale body_mass_1=2.0
+scripts/oracles/run_dynamics_v2.sh            # seeds 0 1 2 in parallel
+tail -f runs/oracles/logs/dynamics_v2_seed0.log   # progress: [cells done/total]
+pkill -f dynamics_oracle.py                   # stop; re-run the launcher to resume
+```
+
+Use `--actuated-dims 0` for physically meaningful Lagrangian terms
+(A-ACT-1); `TAG=dynamics_v3 scripts/oracles/run_dynamics_v2.sh
+--actuated-dims 0` names the logs accordingly.
+
+The dynamics oracle caches pretrained models under
+`runs/oracles/dynamics_oracle/cache/pretrained/<pretrain-hash>/`, and
+finished adaptation cells under `cache/<config-hash>/`. The same command
+resumes after an interruption, and adaptation-only flag changes reuse the
+pretrained models.
+
+```bash
+# Is the learned M the true M up to scale? (A-ACT-1, seconds)
+.venv/bin/python scripts/oracles/mass_gauge.py \
+    --model cart_only=runs/oracles/dynamics_oracle/cache/pretrained/<hash>/lagrangian.pt:0
+# Matched baseline (H1b): context-conditioned MLP vs Lagrangian slots,
+# trained on simulated cart masses {1, 0.7, 0.85, 1.2, 1.4}, tested on x0.5 / x2
+.venv/bin/python -u scripts/oracles/context_oracle.py --seed 0 \
+    >> runs/oracles/logs/context_seed0.log 2>&1
+# Animated web demo data (no training): reload the cached seed-0 mass / gravity runs,
+# redo the one-clip adaptation, export 2 s rollouts and a rendered front-end episode
+.venv/bin/python scripts/oracles/export_demo.py --out runs/demo
+# Same, seeds 0-2 in parallel with named logs; extra flags pass through
+TAG=context_dose scripts/oracles/run_context.sh \
+    --sim-shift cart_mass_x0.4=0.4 --sim-shift cart_mass_x0.3=0.3 --ks 1 5 --modes lag_ctx mlp_ctx
+# Pose noise (pixel-encoder stand-in): sigma_x in metres, sigma_theta in degrees.
+# Trains/adapts on noisy poses with finite-difference velocities and reports
+# errors from the true and from a noisy start state, plus the true-dynamics floor.
+TAG=context_noise_0.3px scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 --pose-noise 0.01 0.5
+# Another physical parameter: actuator gear (or gravity) for training and shifts
+TAG=context_gear scripts/oracles/run_context.sh --param actuator_gear_0 --sim-shift gear_x2=2
+# Start-state estimators from N noisy context frames (backward / quadfit / model-based
+# shooting), evaluation only: re-running a finished noisy config reuses its cells
+TAG=context_noise_0.3px scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 \
+    --pose-noise 0.01 0.5 --start-context 8
+# Smoothed (Savitzky-Golay, 9-frame) training velocities for high noise
+... --pose-noise 0.033 1.7 --train-velocity savgol
+# Poses read from rendered frames by a saved encoder (fully visible windows only)
+.venv/bin/python scripts/oracles/encoder_oracle.py --kind conv --steps 20000 --schedule cosine \
+    --train-episodes 150 --save runs/oracles/encoders/conv-cosine20k-150ep.pt
+TAG=context_encoder_conv scripts/oracles/run_context.sh --sim-shift cart_mass_x0.3=0.3 \
+    --encoder runs/oracles/encoders/conv-cosine20k-150ep.pt --start-context 8
+# Rung 2b: encoder learned without labels through a frozen renderer (A-FE-1)
+.venv/bin/python scripts/oracles/frozen_renderer_oracle.py --kind keypoint
+```
+
+The encoder oracle reports the wrapped angle error in degrees and the
+equivalent image errors (`x_err_px_rms`, `tip_err_px_rms`; 25.35 px per metre
+on camera 0, so one pixel at the pole tip is 2.3°), comparable with the
+pose-noise levels above.
+
+The keypoint / renderer front end (`--encoder-type keypoint --decoder-type
+render`, cartpole only) and the extra losses (`--latent-dynamics-weight`,
+`--latent-dynamics-horizon`, `--keypoint-consistency-weight`,
+`--kl-mech-scale`) are described in
+[`models/mechanics_world_model.md`](models/mechanics_world_model.md).
+
 ## Train The Mechanics Model
 
-Run the current cartpole config (the one that emerged from the v2/v3/v4/
-diag debugging documented in [`current_status.md`](current_status.md)).
-`scripts/train_mechanics.sh` holds this verbatim and is what the project
-runs by default:
+### Gate experiment (October 2026, stopped; frozen)
+
+See the review section of [`archive/status_history_2026-04_to_2026-10-19.md`](archive/status_history_2026-04_to_2026-10-19.md) for why
+and for the pass criteria. The whole experiment runs as one resumable
+pipeline (OOD-v2 collection → both training arms → evaluation → report):
+
+```bash
+bash scripts/gate_pipeline.sh start    # background (nohup); logs in runs/gate/
+bash scripts/gate_pipeline.sh status   # stages, step/ETA, latest losses and live probe
+bash scripts/gate_pipeline.sh stop     # graceful: the trainer writes latest.pt and exits
+bash scripts/gate_pipeline.sh start    # continues where it stopped
+```
+
+Finished stages are skipped via `runs/gate/<stage>.done` markers. The
+trainer writes a resumable mid-epoch `latest.pt` every 250 steps
+(`--checkpoint-every-steps`) and whenever it receives SIGINT/SIGTERM, then
+exits with code 130. A rerun with `--auto-resume` continues at the next
+unseen batch (per-epoch seeded sampler) and drops history rows logged after
+the checkpoint; resumed runs are bit-identical to uninterrupted ones on CPU
+(`tests/test_train_resumable.py`). Each training run also maintains
+`checkpoints/<run>/progress.json` (step, s/step, ETA, latest metrics).
+`runs/gate/report.md` applies the gate criteria mechanically
+(`scripts/gate_report.py`).
+
+The individual steps can also be run by hand:
+
+```bash
+bash scripts/train_gate.sh lagrangian   # B_main with pose forced through q
+bash scripts/train_gate.sh mlp          # same encoder/bottleneck, MLP dynamics
+bash scripts/collect_cartpole_ood.sh    # optional: physically consistent OOD-v2 sets
+bash scripts/eval_gate.sh               # both arms + rssm-phase0-reward, same sequences
+```
+
+The gate flags are `--nuisance-mode style --angle-dims 1 --qdot-stencil
+backward --dissipation-form linear` and `--dynamics-form lagrangian|mlp`.
+`--dt` is omitted so it resolves from the dataset (0.02 s). See
+`docs/models/mechanics_world_model.md` for what each flag does. Compare runs
+with `state_probes.q->pose.mlp` and `foreground_open_loop_mse_h20` in each
+`eval/gate/<arm>/<dataset>/metrics.json`.
+
+### April 2026 configuration (historical)
+
+The config that emerged from the v2/v3/v4/diag debugging documented in
+[`archive/status_history_2026-04_to_2026-10-19.md`](archive/status_history_2026-04_to_2026-10-19.md). `scripts/train_mechanics.sh`
+holds it verbatim. It passes `--dt 0.01`, which is half the true frame
+interval, and uses the `concat` nuisance mode in which `z` ends up carrying
+the pose:
 
 ```bash
 .venv/bin/train-mechanics \
@@ -311,7 +510,7 @@ Notes:
 - `--nuisance-dim 4` + `--nuisance-min-std 1.0` together control the
   nuisance channel's capacity × KL-stiffness. Larger values on either
   triggered a z-channel KL phase transition at step ~300 in earlier
-  iterations; see `current_status.md` for the trace.
+  iterations; see `archive/status_history_2026-04_to_2026-10-19.md` for the trace.
 - `--log-every-steps 50` still keeps the z-diagnostic metrics
   (`z_post_mean_rms`, `kl_z_t0_mean`, `kl_z_transition_mean`, ...)
   dense enough to catch the earlier failure modes (the v2/v3 z blow-up
@@ -341,10 +540,94 @@ two models are directly comparable):
   --sequence-length 32 --warmup-length 5 --horizons 1 5 10
 ```
 
-`metrics.json` additionally carries `linear_probe.q_to_qpos_r2_overall`,
-`linear_probe.qdot_to_qvel_r2_overall` (K2 gate, threshold 0.8) and
-`energy.mean_abs_drift`, `energy.mean_abs_drift_h10` (H3) when the dataset
-carries physics state.
+When the dataset carries physics state, `metrics.json` additionally holds
+`state_probes` (linear + MLP probes from `q`, `q̇`, `z` and their
+concatenations onto `[x, cos θ, sin θ]` and `qvel`, episode-level split —
+the factorization check), the legacy `linear_probe` (raw-angle target; not
+a meaningful gate) and `energy.*` (learned-energy drift, relative
+diagnostic only). Both evaluators also write `copy_last_frame_mse_h*`, and
+`eval-rssm` reports `state_probes` for `h`, `z` and the full RSSM feature.
+Use `--num-sequences 256` so the probes see enough episodes.
+
+OOD physics shifts: use `--physics-scale pole_length=<s>` (MJCF-level, so
+inertia and centre of mass are recompiled) and `body_mass_<i>=<s>` (scales
+mass and inertia together). `geom_size_<i>_<j>` only changes collision and
+rendering, and in the April scripts `geom_size_2_1` pointed at the rail
+`rail2`, not the pole.
+
+### Joint OOD Training (K2 Gauge-Breaking Experiment, historical)
+
+> The April `data/cartpole-ood-*-15k` datasets behind this experiment are
+> physically wrong (rail instead of pole length; mass without inertia).
+> `collect_cartpole_ood.sh` now writes corrected `*-15k-v2` sets; the
+> assemble/train/eval joint scripts still point at the April directories
+> and document what was actually run.
+
+When the nominal-only run fails K2 (as Phase-3 finitediff did — see
+`docs/archive/status_history_2026-04_to_2026-10-19.md`), the next experiment trains the same mechanics
+architecture on a joint dataset spanning nominal + mildly-perturbed
+physics. The four prep + run scripts:
+
+```bash
+# 1) Collect four mildly-perturbed regimes (~30-50 min on MPS).
+bash scripts/collect_cartpole_ood.sh
+
+# 2) Symlink all episode files into a single joint directory (instant).
+bash scripts/assemble_joint_dataset.sh
+
+# 3) Train on the joint dataset (~18 h on MPS, fresh run).
+bash scripts/train_mechanics_joint.sh
+
+# 4) Evaluate on joint + per-regime (~10 min).
+bash scripts/eval_mechanics_joint.sh
+```
+
+The joint-assembler preserves the `episode_*.npz` prefix so
+`src/data/sequence_dataset.py::index_episode_files` picks up every regime
+in one glob; filenames are globally unique (`episode_{regime}_{idx}.npz`)
+so the val split mixes regimes deterministically.
+
+### Direct H1/H2 Evaluation via MPC (blocked)
+
+> `eval-control` and `CEMPlanner` only support `VisualWorldModel`, so the
+> B_main half of `eval_control_grid.sh` cannot run yet; only the B1 arm
+> works. The grid's length points now use `pole_length`.
+
+When K2 stays broken across nominal + joint runs (as documented in
+`docs/archive/status_history_2026-04_to_2026-10-19.md`) but the structured model still produces clean
+pixel trajectories, the right move is to test H1 / H2 directly via
+closed-loop MPC return rather than continue chasing K2. Three scripts:
+
+```bash
+# 1) RSSM B1 baseline with reward head (~18 h).
+bash scripts/train_rssm_with_reward.sh
+
+# 2) Mechanics B_main with reward head (~18 h, parallelizable with 1).
+bash scripts/train_mechanics_with_reward.sh
+
+# 3) eval-control grid: 1 nominal + 5 physical-OOD + 5 visual-OOD,
+#    for both checkpoints (~2-4 h total).
+bash scripts/eval_control_grid.sh
+```
+
+`eval-control` requires a checkpoint trained with `--reward-head`. The
+two `*_with_reward.sh` scripts add `--reward-head --reward-weight 1.0
+--imagined-reward-weight 1.0` to the existing baseline configs and
+write to dedicated checkpoint dirs (`checkpoints/{rssm-phase0,
+mechanics-phase3}-reward/`) so they don't collide with the no-reward
+baselines used for offline metrics.
+
+The grid script writes `eval/control-grid/{B1,B_main}/{regime}/returns.json`
+plus a per-run `summary.csv`. Aggregate via:
+
+```bash
+python -c 'import json,glob; [print(p, json.load(open(p)).get("mean_return")) for p in sorted(glob.glob("eval/control-grid/**/returns.json", recursive=True))]'
+```
+
+Tunable knobs at the top of `scripts/eval_control_grid.sh` via env vars
+(`EPISODES`, `HORIZON`, `N_SAMPLES`, `N_ITERS`); the defaults match the
+research-spec CEM/MPC setup (H=15, 512 samples, 3 iters, 10 episodes
+per condition).
 
 ## Plot Training History
 

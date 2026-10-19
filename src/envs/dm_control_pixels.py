@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,18 +15,35 @@ from numpy.typing import NDArray
 _BODY_MASS_RE = re.compile(r"^body_mass_(\d+)$")
 _DOF_DAMPING_RE = re.compile(r"^dof_damping_(\d+)$")
 _GEOM_SIZE_RE = re.compile(r"^geom_size_(\d+)_(\d+)$")
+_ACTUATOR_GEAR_RE = re.compile(r"^actuator_gear_(\d+)$")
+GRAVITY_KEY = "gravity"
+# Applied when the MJCF is compiled (not post-hoc), so MuJoCo recomputes the
+# pole's inertia and centre of mass. Cartpole only.
+POLE_LENGTH_KEY = "pole_length"
+_CARTPOLE_POLE_FROMTO = 'fromto="0 0 0 0 0 1"'
 
 
 @dataclass(frozen=True)
 class PixelEnvConfig:
     """Configuration for a dm_control pixel environment.
 
-    ``physics_param_scales`` is a flat dict whose keys mirror the ones
-    returned by ``DmControlPixelEnv.physics_params`` (``body_mass_<i>``,
-    ``dof_damping_<i>``, ``geom_size_<i>_<j>``). Each value is a positive
-    multiplicative scale applied immediately after the env is loaded — used
-    for OOD physics shifts (mass×k, length×k, damping×k). ``None`` keeps the
-    nominal physics.
+    ``physics_param_scales`` is a flat dict of positive multiplicative scales
+    used for OOD physics shifts. ``None`` keeps the nominal physics. Keys:
+
+    * ``pole_length`` (cartpole only): scales the pole capsule in the MJCF
+      before compilation, so length, inertia and centre of mass change
+      consistently. This is the only correct way to change the length.
+    * ``body_mass_<i>``: scales the body's mass *and* its inertia tensor
+      (uniform density change); applied after loading.
+    * ``dof_damping_<i>``: scales joint damping; applied after loading.
+    * ``actuator_gear_<i>``: scales actuator ``i``'s gear (the force per
+      unit control); applied after loading.
+    * ``gravity``: scales the gravity vector; applied after loading.
+    * ``geom_size_<i>_<j>``: scales a geom size entry after compilation. This
+      only changes collision and rendering — inertia and centre of mass are
+      fixed at compile time — so it is **not** a length change. (Before the
+      October 2026 fix, ``geom_size_2_1`` was used as "pole length", but geom
+      2 is the static rail ``rail2``; the pole is geom 4.)
     """
 
     env_name: str = "cartpole-swingup"
@@ -48,14 +66,20 @@ class PixelEnvConfig:
                     raise ValueError(
                         f"physics_param_scales[{key!r}]={scale} must be positive",
                     )
+                if key == POLE_LENGTH_KEY:
+                    if not self.env_name.startswith("cartpole-"):
+                        raise ValueError("pole_length scaling is only supported for cartpole")
+                    continue
                 if not (
                     _BODY_MASS_RE.match(key)
                     or _DOF_DAMPING_RE.match(key)
                     or _GEOM_SIZE_RE.match(key)
+                    or _ACTUATOR_GEAR_RE.match(key)
+                    or key == GRAVITY_KEY
                 ):
                     raise ValueError(
-                        f"unknown physics_param_scales key {key!r}; expected "
-                        "body_mass_<i>, dof_damping_<i>, or geom_size_<i>_<j>",
+                        f"unknown physics_param_scales key {key!r}; expected pole_length, body_mass_<i>, "
+                        "dof_damping_<i>, actuator_gear_<i>, gravity, or geom_size_<i>_<j>",
                     )
 
 
@@ -77,13 +101,20 @@ class DmControlPixelEnv:
     def __init__(self, config: PixelEnvConfig) -> None:
         self.config = config
         domain_name, task_name = config.env_name.split("-", maxsplit=1)
-        self._env = suite.load(
-            domain_name=domain_name,
-            task_name=task_name,
-            task_kwargs={"random": config.seed},
-        )
-        if config.physics_param_scales:
-            apply_physics_param_scales(self._env.physics, config.physics_param_scales)
+        scales = dict(config.physics_param_scales or {})
+        pole_length_scale = scales.pop(POLE_LENGTH_KEY, None)
+        if pole_length_scale is not None:
+            self._env = _load_cartpole_with_pole_length(
+                task_name, seed=config.seed, length_scale=pole_length_scale,
+            )
+        else:
+            self._env = suite.load(
+                domain_name=domain_name,
+                task_name=task_name,
+                task_kwargs={"random": config.seed},
+            )
+        if scales:
+            apply_physics_param_scales(self._env.physics, scales)
         self._time_step: Any | None = None
 
     @property
@@ -106,6 +137,17 @@ class DmControlPixelEnv:
 
         self._time_step = self._env.reset()
         return self.render()
+
+    def reset_without_render(self) -> dict[str, NDArray[np.float64]]:
+        """Reset and return the initial physics state, no image (simulator-only diagnostics)."""
+
+        self._time_step = self._env.reset()
+        return self.physics_state()
+
+    def episode_done(self) -> bool:
+        """Whether the last step ended the episode."""
+
+        return bool(self._time_step is not None and self._time_step.last())
 
     def step(self, action: NDArray[np.floating[Any]]) -> PixelStep:
         """Apply one action for ``action_repeat`` physics steps."""
@@ -133,6 +175,36 @@ class DmControlPixelEnv:
             qvel=physics_state["qvel"],
         )
 
+    def step_without_render(self, action: NDArray[np.floating[Any]]) -> dict[str, NDArray[np.float64]]:
+        """Apply one action for ``action_repeat`` physics steps; return the state, no image.
+
+        For simulator-only diagnostics (e.g. intervention-effect checks)
+        where rendering would dominate the cost.
+        """
+
+        for _ in range(self.config.action_repeat):
+            self._time_step = self._env.step(action)
+            if self._time_step.last():
+                break
+        return self.physics_state()
+
+    def step_state(self, action: NDArray[np.floating[Any]]) -> tuple[dict[str, NDArray[np.float64]], float]:
+        """Like ``step_without_render`` but also return the reward summed over ``action_repeat``."""
+
+        reward = 0.0
+        for _ in range(self.config.action_repeat):
+            self._time_step = self._env.step(action)
+            reward += float(self._time_step.reward or 0.0)
+            if self._time_step.last():
+                break
+        return self.physics_state(), reward
+
+    @property
+    def physics(self) -> Any:
+        """The underlying dm_control ``Physics`` (``.model.ptr`` / ``.data.ptr`` are MuJoCo structs)."""
+
+        return self._env.physics
+
     def physics_state(self) -> dict[str, NDArray[np.float64]]:
         """Return a snapshot of the simulator's generalized state.
 
@@ -159,6 +231,13 @@ class DmControlPixelEnv:
         body_mass = np.asarray(physics.model.body_mass, dtype=np.float64)
         for i, mass in enumerate(body_mass):
             params[f"body_mass_{i}"] = float(mass)
+        body_inertia = np.asarray(physics.model.body_inertia, dtype=np.float64)
+        body_ipos = np.asarray(physics.model.body_ipos, dtype=np.float64)
+        for i in range(body_inertia.shape[0]):
+            for j in range(body_inertia.shape[1]):
+                params[f"body_inertia_{i}_{j}"] = float(body_inertia[i, j])
+            # Centre-of-mass offset along the body z axis (pole: half length).
+            params[f"body_ipos_{i}_2"] = float(body_ipos[i, 2])
         dof_damping = np.asarray(physics.model.dof_damping, dtype=np.float64)
         for i, damping in enumerate(dof_damping):
             params[f"dof_damping_{i}"] = float(damping)
@@ -167,6 +246,15 @@ class DmControlPixelEnv:
             for j in range(geom_size.shape[1]):
                 params[f"geom_size_{i}_{j}"] = float(geom_size[i, j])
         return params
+
+    def frame_dt(self) -> float:
+        """Simulated seconds between consecutive rendered frames.
+
+        Equals the suite's control timestep times ``action_repeat``; this is
+        the ``dt`` a continuous-time world model must integrate over.
+        """
+
+        return float(self._env.control_timestep()) * self.config.action_repeat
 
     def reset_physics_state(self) -> dict[str, NDArray[np.float64]]:
         """Return the physics state right after ``reset`` so callers can store ``qpos_0``."""
@@ -197,6 +285,47 @@ class DmControlPixelEnv:
         self.close()
 
 
+def simulator_versions() -> dict[str, str]:
+    """Installed versions of the packages that determine physics and pixels."""
+
+    versions: dict[str, str] = {}
+    for package in ("mujoco", "dm-control"):
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = "unknown"
+    return versions
+
+
+def _load_cartpole_with_pole_length(task_name: str, *, seed: int, length_scale: float) -> Any:
+    """Build a cartpole environment whose pole capsule is ``length_scale`` x nominal.
+
+    Mirrors ``dm_control.suite.cartpole.<task>()`` but edits the MJCF first, so
+    MuJoCo compiles the pole's inertia and centre of mass for the new length
+    (the geom keeps its declared mass).
+    """
+
+    from dm_control.rl import control
+    from dm_control.suite import cartpole
+
+    if task_name not in ("balance", "balance_sparse", "swingup", "swingup_sparse"):
+        raise ValueError(f"pole_length scaling does not support cartpole task {task_name!r}")
+    xml, assets = cartpole.get_model_and_assets()
+    xml_text = xml.decode() if isinstance(xml, bytes) else xml
+    if xml_text.count(_CARTPOLE_POLE_FROMTO) != 1:
+        raise RuntimeError("unexpected cartpole MJCF: cannot locate the pole fromto")
+    xml_text = xml_text.replace(
+        _CARTPOLE_POLE_FROMTO, f'fromto="0 0 0 0 0 {length_scale:.6g}"',
+    )
+    physics = cartpole.Physics.from_xml_string(xml_text, assets)
+    task = cartpole.Balance(
+        swing_up=task_name.startswith("swingup"),
+        sparse=task_name.endswith("sparse"),
+        random=seed,
+    )
+    return control.Environment(physics, task, time_limit=cartpole._DEFAULT_TIME_LIMIT)
+
+
 def apply_physics_param_scales(physics: Any, scales: dict[str, float]) -> None:
     """Mutate ``physics.model`` arrays in place by the given multiplicative scales.
 
@@ -212,6 +341,9 @@ def apply_physics_param_scales(physics: Any, scales: dict[str, float]) -> None:
         if (match := _BODY_MASS_RE.match(key)) is not None:
             index = int(match.group(1))
             _scale_array_entry(physics.model.body_mass, (index,), scale, key)
+            # Same geometry, scaled density: the inertia tensor scales with mass.
+            for axis in range(3):
+                _scale_array_entry(physics.model.body_inertia, (index, axis), scale, key)
         elif (match := _DOF_DAMPING_RE.match(key)) is not None:
             index = int(match.group(1))
             _scale_array_entry(physics.model.dof_damping, (index,), scale, key)
@@ -219,10 +351,15 @@ def apply_physics_param_scales(physics: Any, scales: dict[str, float]) -> None:
             i = int(match.group(1))
             j = int(match.group(2))
             _scale_array_entry(physics.model.geom_size, (i, j), scale, key)
+        elif (match := _ACTUATOR_GEAR_RE.match(key)) is not None:
+            _scale_array_entry(physics.model.actuator_gear, (int(match.group(1)), 0), scale, key)
+        elif key == GRAVITY_KEY:
+            for axis in range(3):
+                _scale_array_entry(physics.model.opt.gravity, (axis,), scale, key)
         else:
             raise ValueError(
                 f"unknown physics scale key {key!r}; expected body_mass_<i>, "
-                "dof_damping_<i>, or geom_size_<i>_<j>",
+                "dof_damping_<i>, actuator_gear_<i>, gravity, or geom_size_<i>_<j>",
             )
 
 

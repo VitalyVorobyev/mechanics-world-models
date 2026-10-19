@@ -6,6 +6,7 @@
     --imagination-context-steps 4 --imagination-horizon 12 \
     --foreground-imagination-reconstruction-weight 2.0 \
     --kl-weight 0.1 \
+    --auto-resume \
     --kl-free-nats-mech 0.5 --kl-free-nats-nuisance 3.0 \
     --nuisance-min-std 1.0 \
     --learning-rate 1e-4 --warmup-steps 2000 \

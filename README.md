@@ -1,23 +1,27 @@
 # Mechanics World Models
 
-Research code for visual model-based reinforcement learning with mechanical
-structure in the latent dynamics.
+Research code for camera-driven, mechanics-aware control of mechanical
+systems, starting with DeepMind Control `cartpole-swingup`.
 
-The question behind this repository is simple: can a world model that knows
-something about mechanics generalize better than a generic recurrent latent model
-when the physical system or the visual scene changes? In this project, the target
-is not just better pixel prediction on the training distribution. The target is
-control under shifted mass, length, friction, camera pose, background, and
-lighting.
+The goal: take camera images, learn the mechanics of the system (a
+learned Lagrangian over given generalized coordinates), and drive it with
+that learned model. Cartpole swing-up is the simplest showcase; the aim is
+more complex mechanical systems. The pipeline is built from standard
+components: a keypoint pose reader trained on simulator renders, a
+model-based state estimator, and an MPPI planner. New methods are only
+introduced where a measured gap forces them.
 
-The full research plan is in [`docs/research_spec.md`](docs/research_spec.md).
-Trainable model notes live in [`docs/models/`](docs/models/):
+- Scope, question tree and stop date: [`docs/charter.md`](docs/charter.md)
+- What is happening now: [`docs/current_status.md`](docs/current_status.md)
+- What is established, with graded evidence: [`docs/claims.md`](docs/claims.md)
+- Why the project looks like this (critical review, 2026-10-19):
+  [`docs/review-2026-10-19.md`](docs/review-2026-10-19.md)
+- How research is done here: [`docs/research_protocol.md`](docs/research_protocol.md)
+
+Trainable model notes (end-to-end pixel world models, now frozen) live in
+[`docs/models/`](docs/models/):
 - [minimal RSSM visual world model](docs/models/rssm_visual_world_model.md)
 - [mechanics-structured visual world model](docs/models/mechanics_world_model.md)
-
-The live status of the research — what works, what the open problem is, and
-the next experiment to run — is tracked in
-[`docs/current_status.md`](docs/current_status.md).
 
 ## Current Status
 
@@ -39,26 +43,26 @@ and visual distribution shift:
 - offline trainers (`train-rssm`, `train-mechanics`) with JSONL loss history,
   checkpoints, AdamW + cosine LR, auto-resume, NaN/Inf skip guard, and live
   open-loop FG-MSE validation probes
-- evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE,
-  videos, and contact sheets; `eval-mechanics` additionally reports a
-  linear-probe R² onto the simulator's ground-truth state (when available)
-  and a learned-energy drift diagnostic
-- a CEM / MPC planner (`eval-control`) for scoring world-model checkpoints
-  on the real environment, including physics-perturbation and
-  visual-distractor wrappers for the OOD grid
-- a pytest suite (127 tests at time of writing) covering environment,
+- evaluators (`eval-rssm`, `eval-mechanics`) producing per-horizon MSE
+  against a copy-last-frame baseline, videos, and contact sheets, plus
+  linear and MLP state probes onto the simulator's ground-truth state (when
+  available); `eval-mechanics` also reports a learned-energy drift
+- a CEM / MPC planner (`eval-control`, RSSM checkpoints only for now),
+  including physics-perturbation and visual-distractor wrappers
+- a pytest suite (139 tests at time of writing) covering environment,
   dataset, model shapes, losses, finite-diff kinematics, training-history,
-  MPS regression guards, linear probe, and end-to-end evaluation smoke
-  tests
+  MPS regression guards, probes, and end-to-end evaluation smoke tests
 
-Phase 0 (RSSM stable) is closed. The mechanics model has been through
-three rounds of debugging — a z-channel KL phase transition and a weak-
-coupling `q`/`q̇` factorization — and the current Phase-3 architecture
-replaces the soft smoothness prior with a hard kinematic constraint. See
-`docs/current_status.md` for the blow-by-blow and the pending training /
-evaluation run on the recollected-with-physics dataset. The ablations
-(no-dissipation, unfactored, reconstruction-free contrastive) and the
-OOD evaluation grid are still ahead.
+Until October 2026 the project tried to *learn* a Lagrangian world model
+end to end from pixels and compare it with the RSSM under distribution
+shift. A review on 2026-10-19 stopped that line: the comparison is crowded
+in the literature, zero-shot "generalization" to new physical parameters is
+ill-posed without an adaptation mechanism, and the standard modular route
+to the actual goal had never been tried. The world-model code above is kept
+and tested but frozen; the oracle harness (`scripts/oracles/`, ground-truth
+tests of each component) and the research bookkeeping
+(`scripts/research/`, a committed run ledger with pre-registration checks)
+carry forward. See [`docs/current_status.md`](docs/current_status.md).
 
 ## Why This Exists
 
@@ -141,7 +145,7 @@ FG-MSE probe):
 
 Train the mechanics model. The recommended cartpole config is the one that
 emerged from the v2/v3/v4/diag debugging (full story in
-`docs/current_status.md`):
+`docs/archive/status_history_2026-04_to_2026-10-19.md`):
 
 ```bash
 .venv/bin/train-mechanics \
@@ -277,22 +281,24 @@ Done:
   differencing `q̇ = d/dt(q)` inside the encoder
 - reward prediction head, CEM / MPC planner, physics-perturbation and
   visual-distractor wrappers, `eval-control` entry point
-- linear-probe R² and learned-energy diagnostics for the factorization
-- automatic physics-state serialization in the collector so K2 / H3
-  diagnostics can run without a separate flag
+- state probes (episode-split, linear + MLP) and learned-energy diagnostics
+- automatic physics-state, frame-timing and simulator-version
+  serialization in the collector
+- Phase-3 training and evaluation, joint multi-regime training, RSSM with
+  reward head (results and their re-interpretation in
+  `docs/archive/status_history_2026-04_to_2026-10-19.md`)
+- oracle harness and the true-state few-shot adaptation study (H1b,
+  `docs/claims.md`)
 
-Ahead:
+Ahead (see [`docs/charter.md`](docs/charter.md)):
 
-- run the Phase-3 mechanics training (`bash scripts/train_mechanics.sh`)
-  and evaluate on the recollected `cartpole-swingup-random-100k-v2`
-  dataset; measure K1 (FG-MSE), K2 (linear probe R² for both q and q̇),
-  H3 (learned-energy drift)
-- B2 (no dissipation), B3 (unfactored LNN+D), B4 (reconstruction-free
-  contrastive) ablations
-- OOD evaluation grid across mass / length / damping and visual shifts on
-  cartpole, then acrobot
-- keep the implementation inspectable enough to debug failure cases
-  directly
+- E-006: MPPI planner over the true MuJoCo model (control ceiling)
+- E-007: MPPI over a learned Lagrangian (vs an MLP) on true state, with a
+  few rounds of on-policy data
+- E-008: camera in the loop (sim-trained keypoints + estimator), then a
+  closed-loop demo
+- backlog: a more complex system (two- or three-pole cartpole), parameter
+  adaptation
 
 Actor-critic training, replay APIs, zarr storage, and distributed collection
-are deliberately out of scope until the main comparison is complete.
+are deliberately out of scope.

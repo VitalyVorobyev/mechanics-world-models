@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from data import EpisodeSequenceDataset, ImageCropConfig
 from data.image_transforms import add_crop_args, crop_config_from_args
@@ -508,10 +508,12 @@ def train(config: TrainConfig, console: Console | None = None) -> None:
                 "when the open-loop probe is enabled; "
                 f"got sequence_length={config.sequence_length}, required={required}",
             )
+        assert val_dataset is not None
         val_probe_batch = collect_val_probe_batch(
-            loader=val_loader,
+            dataset=val_dataset,
             num_sequences=config.val_open_loop_sequences,
             device=device,
+            seed=config.seed,
         )
         if val_probe_batch is None:
             raise ValueError("validation loader is empty; cannot run open-loop probe")
@@ -1161,32 +1163,32 @@ def run_val_open_loop_probe(
 
 
 def collect_val_probe_batch(
-    loader: DataLoader,
+    dataset: Dataset,
     num_sequences: int,
     device: torch.device,
+    seed: int = 0,
 ) -> dict[str, torch.Tensor] | None:
-    """Build a fixed-size contiguous batch from the validation loader.
+    """Build a fixed probe batch from a seeded random sample of validation windows.
 
-    Returns ``None`` when the loader is empty. Sequences are accumulated from
-    the start of the loader until the target count is reached and then
-    truncated to ``num_sequences``. This keeps the probe deterministic across
-    steps because ``val_loader`` is built with ``shuffle=False`` elsewhere.
+    Returns ``None`` when the dataset is empty. The sample is drawn once, so
+    the probe stays deterministic across steps. Taking the first
+    ``num_sequences`` windows instead (the pre-October-2026 behaviour) picks
+    overlapping windows from the start of a single episode, where the pole
+    hangs near rest; that made the live probe roughly 2x easier than the
+    offline eval on random windows.
     """
 
-    collected: list[dict[str, torch.Tensor]] = []
-    total = 0
-    for batch in loader:
-        collected.append(batch)
-        total += batch["observations"].shape[0]
-        if total >= num_sequences:
-            break
-    if not collected:
+    total = len(dataset)
+    if total == 0:
         return None
-    merged = {
-        key: torch.cat([c[key] for c in collected], dim=0)[:num_sequences].to(device)
-        for key in collected[0]
+    count = min(num_sequences, total)
+    rng = np.random.default_rng(seed)
+    indices = sorted(int(i) for i in rng.choice(total, size=count, replace=False))
+    samples = [dataset[i] for i in indices]
+    return {
+        key: torch.stack([sample[key] for sample in samples], dim=0).to(device)
+        for key in samples[0]
     }
-    return merged
 
 
 def build_lr_scheduler(

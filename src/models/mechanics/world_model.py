@@ -10,18 +10,33 @@ a learned Lagrangian + AR(1) nuisance instead of a GRU-backed RSSM.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import torch
 from torch import nn
 
 from models.decoder import ImageDecoder
-from models.mechanics.encoder import FactoredEncoder, FactoredPosterior
+from models.mechanics.coordinates import (
+    coordinate_feature_size,
+    embed_coordinates,
+    validate_angle_dims,
+    wrap_angle_dims,
+)
+from models.mechanics.encoder import (
+    FactoredEncoder,
+    FactoredPosterior,
+    KeypointFactoredEncoder,
+    derive_qdot_from_q,
+)
 from models.mechanics.integrator import semi_implicit_euler_step
+from models.mechanics.keypoints import GeometricRenderer
 from models.mechanics.lagrangian import (
     Actuation,
     Dissipation,
     LagrangianDynamics,
+    LinearDissipation,
     MassMatrix,
+    MLPDynamics,
     Potential,
 )
 from models.mechanics.transition import MechanicsPrior, MechanicsTransition
@@ -78,6 +93,19 @@ class MechanicsWorldModelOutput:
     imagined_target_start: int | None = None
     reward_predictions: torch.Tensor | None = None
     imagined_reward_predictions: torch.Tensor | None = None
+    # Mean squared (angle-wrapped) error of multi-start latent rollouts against
+    # the encoded q of later frames; 0-d, only when latent_dynamics_horizon > 0.
+    latent_dynamics_loss: torch.Tensor | None = None
+    # Mean squared distance between encoder keypoints and the renderer's
+    # keypoints for the same q; 0-d, only with keypoint encoder + renderer.
+    keypoint_consistency_loss: torch.Tensor | None = None
+
+
+NUISANCE_MODES = ("concat", "style")
+DYNAMICS_FORMS = ("lagrangian", "mlp")
+DISSIPATION_FORMS = ("rayleigh_mlp", "linear")
+ENCODER_TYPES = ("conv", "keypoint")
+DECODER_TYPES = ("deconv", "render")
 
 
 def _sample_normal(mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
@@ -86,7 +114,22 @@ def _sample_normal(mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
 
 
 class MechanicsWorldModel(nn.Module):
-    """Factored ``(q, qdot, z)`` visual world model."""
+    """Factored ``(q, qdot, z)`` visual world model.
+
+    ``nuisance_mode`` controls how ``z`` reaches the pixels:
+
+    * ``"concat"`` (legacy): the decoder reads ``concat(q, q̇, z)``. Nothing
+      stops ``z`` from carrying the pose — on the April 2026 checkpoints a
+      probe on ``z`` recovered cart position with R² ≈ 0.85 while ``q`` had
+      collapsed (see ``docs/archive/status_history_2026-04_to_2026-10-19.md``).
+    * ``"style"``: the decoder renders from the mechanics coordinates only;
+      ``z`` enters as a per-channel gain/offset on the decoder logits, which
+      can express colour/brightness nuisance but not where the cart is. The
+      reward head then reads ``(q, q̇)`` only, as the research spec states.
+
+    ``angle_dims`` marks generalized coordinates living on ``S^1``; the decoder,
+    reward head and Lagrangian primitives see them through ``(cos, sin)``.
+    """
 
     def __init__(
         self,
@@ -110,54 +153,122 @@ class MechanicsWorldModel(nn.Module):
         nuisance_alpha_init: float = 0.95,
         reward_head: bool = False,
         reward_head_hidden_size: int = 200,
+        qdot_stencil: str = "central",
+        angle_dims: Sequence[int] = (),
+        nuisance_mode: str = "concat",
+        dynamics_form: str = "lagrangian",
+        dissipation_form: str = "rayleigh_mlp",
+        mlp_dynamics_hidden_size: int = 128,
+        encoder_type: str = "conv",
+        decoder_type: str = "deconv",
     ) -> None:
         super().__init__()
+        if nuisance_mode not in NUISANCE_MODES:
+            raise ValueError(f"nuisance_mode must be one of {NUISANCE_MODES}")
+        if encoder_type not in ENCODER_TYPES:
+            raise ValueError(f"encoder_type must be one of {ENCODER_TYPES}")
+        if decoder_type not in DECODER_TYPES:
+            raise ValueError(f"decoder_type must be one of {DECODER_TYPES}")
+        if (encoder_type == "keypoint" or decoder_type == "render") and (
+            q_dim != 2 or tuple(angle_dims) != (1,)
+        ):
+            raise ValueError(
+                "keypoint encoder / render decoder are cartpole-specific: "
+                "require q_dim=2 and angle_dims=(1,)",
+            )
+        if decoder_type == "render" and nuisance_mode != "style":
+            raise ValueError("decoder_type='render' requires nuisance_mode='style'")
+        self.encoder_type = encoder_type
+        self.decoder_type = decoder_type
         self.action_dim = action_dim
         self.q_dim = q_dim
         self.nuisance_dim = nuisance_dim
         self.image_size = image_size
         self.input_channels = input_channels
         self.dt = dt
-        self.feature_size = 2 * q_dim + nuisance_dim
+        self.angle_dims = validate_angle_dims(angle_dims, q_dim)
+        self.nuisance_mode = nuisance_mode
+        coordinate_size = coordinate_feature_size(q_dim, self.angle_dims)
+        mechanics_feature_size = coordinate_size + q_dim
+        if nuisance_mode == "style":
+            decoder_input_size = coordinate_size
+            # Reward / imagined features: mechanics state only.
+            self.feature_size = mechanics_feature_size
+        else:
+            decoder_input_size = mechanics_feature_size + nuisance_dim
+            self.feature_size = decoder_input_size
         self.reward_head_enabled = reward_head
 
-        self.encoder = FactoredEncoder(
-            q_dim=q_dim,
-            nuisance_dim=nuisance_dim,
-            dt=dt,
-            embedding_size=embedding_size,
-            head_hidden_size=encoder_head_hidden_size,
-            mech_min_std=mech_min_std,
-            nuisance_min_std=nuisance_min_std,
-            input_channels=input_channels,
-        )
-        self.dynamics = LagrangianDynamics(
-            mass_matrix=MassMatrix(
+        self.encoder: FactoredEncoder | KeypointFactoredEncoder
+        if encoder_type == "keypoint":
+            self.encoder = KeypointFactoredEncoder(
+                nuisance_dim=nuisance_dim,
+                dt=dt,
+                head_hidden_size=encoder_head_hidden_size,
+                mech_min_std=mech_min_std,
+                nuisance_min_std=nuisance_min_std,
+                input_channels=input_channels,
+                qdot_stencil=qdot_stencil,
+            )
+        else:
+            self.encoder = FactoredEncoder(
                 q_dim=q_dim,
-                hidden_size=mass_matrix_hidden_size,
-                hidden_layers=dynamics_hidden_layers,
-            ),
-            potential=Potential(
+                nuisance_dim=nuisance_dim,
+                dt=dt,
+                embedding_size=embedding_size,
+                head_hidden_size=encoder_head_hidden_size,
+                mech_min_std=mech_min_std,
+                nuisance_min_std=nuisance_min_std,
+                input_channels=input_channels,
+                qdot_stencil=qdot_stencil,
+                angle_dims=self.angle_dims,
+            )
+        if dynamics_form not in DYNAMICS_FORMS:
+            raise ValueError(f"dynamics_form must be one of {DYNAMICS_FORMS}")
+        if dissipation_form not in DISSIPATION_FORMS:
+            raise ValueError(f"dissipation_form must be one of {DISSIPATION_FORMS}")
+        self.dynamics_form = dynamics_form
+        self.dynamics: LagrangianDynamics | MLPDynamics
+        if dynamics_form == "mlp":
+            self.dynamics = MLPDynamics(
                 q_dim=q_dim,
-                hidden_size=potential_hidden_size,
+                action_dim=action_dim,
+                hidden_size=mlp_dynamics_hidden_size,
                 hidden_layers=dynamics_hidden_layers,
-            ),
-            dissipation=(
-                Dissipation(
+                angle_dims=self.angle_dims,
+            )
+        else:
+            dissipation: Dissipation | LinearDissipation | None = None
+            if with_dissipation and dissipation_form == "linear":
+                dissipation = LinearDissipation(q_dim=q_dim)
+            elif with_dissipation:
+                dissipation = Dissipation(
                     q_dim=q_dim,
                     hidden_size=dissipation_hidden_size,
                     hidden_layers=dynamics_hidden_layers,
                 )
-                if with_dissipation
-                else None
-            ),
-            actuation=Actuation(
-                q_dim=q_dim,
-                action_dim=action_dim,
-                hidden_size=actuation_hidden_size,
-                hidden_layers=dynamics_hidden_layers,
-            ),
-        )
+            self.dynamics = LagrangianDynamics(
+                mass_matrix=MassMatrix(
+                    q_dim=q_dim,
+                    hidden_size=mass_matrix_hidden_size,
+                    hidden_layers=dynamics_hidden_layers,
+                    angle_dims=self.angle_dims,
+                ),
+                potential=Potential(
+                    q_dim=q_dim,
+                    hidden_size=potential_hidden_size,
+                    hidden_layers=dynamics_hidden_layers,
+                    angle_dims=self.angle_dims,
+                ),
+                dissipation=dissipation,
+                actuation=Actuation(
+                    q_dim=q_dim,
+                    action_dim=action_dim,
+                    hidden_size=actuation_hidden_size,
+                    hidden_layers=dynamics_hidden_layers,
+                    angle_dims=self.angle_dims,
+                ),
+            )
         self.transition = MechanicsTransition(
             dynamics=self.dynamics,
             nuisance_dim=nuisance_dim,
@@ -167,11 +278,22 @@ class MechanicsWorldModel(nn.Module):
             nuisance_prior_min_std=nuisance_min_std,
             nuisance_alpha_init=nuisance_alpha_init,
         )
-        self.decoder = ImageDecoder(
-            feature_size=self.feature_size,
-            output_channels=input_channels,
-            output_size=image_size,
-        )
+        self.decoder: ImageDecoder | GeometricRenderer
+        if decoder_type == "render":
+            self.decoder = GeometricRenderer(output_channels=input_channels, output_size=image_size)
+        else:
+            self.decoder = ImageDecoder(
+                feature_size=decoder_input_size,
+                output_channels=input_channels,
+                output_size=image_size,
+            )
+        self.style_head: nn.Linear | None = None
+        if nuisance_mode == "style":
+            # Per-channel (gain, offset) on the decoder logits; zero-init so
+            # training starts from the unmodulated mechanics-only render.
+            self.style_head = nn.Linear(nuisance_dim, 2 * input_channels)
+            nn.init.zeros_(self.style_head.weight)
+            nn.init.zeros_(self.style_head.bias)
         # Register dynamics submodules so their parameters are tracked; the
         # LagrangianDynamics dataclass holds them but isn't an nn.Module.
         self._register_dynamics_modules()
@@ -197,11 +319,44 @@ class MechanicsWorldModel(nn.Module):
         behave correctly.
         """
 
+        if isinstance(self.dynamics, MLPDynamics):
+            return  # an nn.Module itself, already registered as ``self.dynamics``
         self.mass_matrix_module = self.dynamics.mass_matrix
         self.potential_module = self.dynamics.potential
         self.actuation_module = self.dynamics.actuation
         if self.dynamics.dissipation is not None:
             self.dissipation_module = self.dynamics.dissipation
+
+    def reward_features(
+        self, q: torch.Tensor, qdot: torch.Tensor, z: torch.Tensor,
+    ) -> torch.Tensor:
+        """Reward-head / planner features: ``[..., feature_size]``.
+
+        ``concat`` mode keeps the legacy ``concat(q, q̇, z)`` (with angle dims
+        embedded); ``style`` mode drops ``z``.
+        """
+
+        mechanics = torch.cat([embed_coordinates(q, self.angle_dims), qdot], dim=-1)
+        if self.nuisance_mode == "style":
+            return mechanics
+        return torch.cat([mechanics, z], dim=-1)
+
+    def decode(
+        self, q: torch.Tensor, qdot: torch.Tensor, z: torch.Tensor,
+    ) -> torch.Tensor:
+        """Render ``[B, T, C, H, W]`` images from ``[B, T, ·]`` latent means/samples."""
+
+        if self.nuisance_mode == "style":
+            assert self.style_head is not None
+            if isinstance(self.decoder, GeometricRenderer):
+                flat = self.decoder(q.reshape(-1, q.shape[-1]))
+                logits = flat.reshape(*q.shape[:-1], *flat.shape[1:])
+            else:
+                logits = self.decoder.decode_logits(embed_coordinates(q, self.angle_dims))
+            gain, offset = torch.chunk(self.style_head(z), chunks=2, dim=-1)  # [B, T, C]
+            logits = logits * (1.0 + gain[..., None, None]) + offset[..., None, None]
+            return torch.sigmoid(logits)
+        return self.decoder(self.reward_features(q, qdot, z))
 
     def forward(
         self,
@@ -209,15 +364,24 @@ class MechanicsWorldModel(nn.Module):
         actions: torch.Tensor,
         imagination_context_steps: int = 0,
         imagination_horizon: int = 0,
+        latent_dynamics_horizon: int = 0,
     ) -> MechanicsWorldModelOutput:
-        """Run a posterior+prior pass with optional prior imagination."""
+        """Run a posterior+prior pass with optional prior imagination.
+
+        ``latent_dynamics_horizon > 0`` also rolls the dynamics that many
+        steps from every frame and scores it against the encoded ``q``
+        (KeyCLD-style multi-start loss), which gives dense dynamics gradients
+        without decoding.
+        """
 
         posterior = self.encoder(observations)
         rollout = self._rollout(posterior=posterior, actions=actions)
-        features = rollout.features_posterior_mean
-        reconstructions = self.decoder(features)
+        reconstructions = self.decode(posterior.q_mean, posterior.qdot_mean, posterior.z_mean)
         reward_predictions: torch.Tensor | None = None
         if self.reward_head is not None:
+            features = self.reward_features(
+                posterior.q_mean, posterior.qdot_mean, posterior.z_mean,
+            )
             reward_predictions = self.reward_head(features).squeeze(-1)
 
         imagined_reconstructions: torch.Tensor | None = None
@@ -244,7 +408,19 @@ class MechanicsWorldModel(nn.Module):
             if self.reward_head is not None and imagined_features is not None:
                 imagined_reward_predictions = self.reward_head(imagined_features).squeeze(-1)
 
+        latent_dynamics_loss: torch.Tensor | None = None
+        if latent_dynamics_horizon > 0:
+            latent_dynamics_loss = self.multi_start_latent_loss(
+                posterior, actions, latent_dynamics_horizon,
+            )
+        keypoint_consistency_loss: torch.Tensor | None = None
+        if posterior.keypoints is not None and isinstance(self.decoder, GeometricRenderer):
+            rendered = self.decoder.keypoints(posterior.q_mean)
+            keypoint_consistency_loss = (posterior.keypoints - rendered).square().sum(-1).mean()
+
         return MechanicsWorldModelOutput(
+            latent_dynamics_loss=latent_dynamics_loss,
+            keypoint_consistency_loss=keypoint_consistency_loss,
             rollout=rollout,
             reconstructions=reconstructions,
             imagined_reconstructions=imagined_reconstructions,
@@ -256,6 +432,47 @@ class MechanicsWorldModel(nn.Module):
             reward_predictions=reward_predictions,
             imagined_reward_predictions=imagined_reward_predictions,
         )
+
+    def multi_start_latent_loss(
+        self,
+        posterior: FactoredPosterior,
+        actions: torch.Tensor,
+        horizon: int,
+    ) -> torch.Tensor:
+        """Roll ``horizon`` integrator steps from every usable frame; L2 vs encoded q.
+
+        Starts at ``t = 1 .. T - 1 - horizon`` (``t = 0`` is skipped because
+        its finite-difference ``q̇`` reads frame 1). Start states use the
+        posterior means; targets are the encoder's ``q_{t+k}``, detached so
+        the loss trains the dynamics rather than pulling the encoder towards
+        whatever the dynamics predict. Angle residuals are wrapped.
+        Shapes: posterior ``[B, T, d]``, actions ``[B, T, A]``.
+        """
+
+        batch, steps, q_dim = posterior.q_mean.shape
+        num_starts = steps - 1 - horizon
+        if num_starts < 1:
+            raise ValueError(
+                f"latent_dynamics_horizon={horizon} needs sequence_length >= {horizon + 2}",
+            )
+        q = posterior.q_mean[:, 1 : 1 + num_starts].reshape(-1, q_dim)
+        qdot = posterior.qdot_mean[:, 1 : 1 + num_starts].reshape(-1, q_dim)
+        targets = posterior.q_mean.detach()
+        squared = q.new_zeros(())
+        for k in range(horizon):
+            action = actions[:, 1 + k : 1 + k + num_starts].reshape(-1, actions.shape[-1])
+            q, qdot = semi_implicit_euler_step(
+                dynamics=self.dynamics,
+                q=q,
+                qdot=qdot,
+                u=action,
+                dt=self.dt,
+                n_substeps=self.transition.n_substeps,
+            )
+            target = targets[:, 2 + k : 2 + k + num_starts].reshape(-1, q_dim)
+            residual = wrap_angle_dims(q - target, self.angle_dims)
+            squared = squared + residual.square().mean()
+        return squared / horizon
 
     def _rollout(
         self,
@@ -284,7 +501,16 @@ class MechanicsWorldModel(nn.Module):
         # only the order of consumed RNG draws changes — distributionally each
         # sample is identical to before.
         q_samples = _sample_normal(posterior.q_mean, posterior.q_std)
-        qdot_samples = _sample_normal(posterior.qdot_mean, posterior.qdot_std)
+        # q̇ samples are the finite difference of the q samples (not an
+        # independent draw), so the kinematic constraint holds per sample and
+        # not only for the posterior means.
+        qdot_samples, _ = derive_qdot_from_q(
+            q_samples,
+            posterior.q_std,
+            dt=self.dt,
+            stencil=self.encoder.qdot_stencil,
+            angle_dims=self.angle_dims,
+        )
         z_samples = _sample_normal(posterior.z_mean, posterior.z_std)
 
         # ``initial`` (t=0) is a fixed unit-Gaussian prior with no history.
@@ -324,6 +550,13 @@ class MechanicsWorldModel(nn.Module):
         prior_q_mean = torch.cat(
             [initial.q_mean.unsqueeze(1), _unflatten(prior_flat.q_mean)], dim=1,
         )
+        if self.angle_dims:
+            # Represent each prior angle by the 2*pi-equivalent value nearest
+            # the posterior mean, so the KL measures angular distance rather
+            # than penalizing an integrator step across the +-pi branch cut.
+            prior_q_mean = posterior.q_mean + wrap_angle_dims(
+                prior_q_mean - posterior.q_mean, self.angle_dims,
+            )
         prior_q_std = torch.cat(
             [initial.q_std.unsqueeze(1), _unflatten(prior_flat.q_std)], dim=1,
         )
@@ -386,7 +619,16 @@ class MechanicsWorldModel(nn.Module):
             )
 
         q = rollout.posterior.q_mean[:, context_steps - 1]
-        qdot = rollout.posterior.qdot_mean[:, context_steps - 1]
+        if context_steps >= 2:
+            # Causal start velocity: a backward difference over the last two
+            # context frames. The encoder's central-difference q̇ at
+            # ``context_steps - 1`` would read ``q`` of frame ``context_steps``,
+            # which is the first open-loop target.
+            qdot = wrap_angle_dims(
+                q - rollout.posterior.q_mean[:, context_steps - 2], self.angle_dims,
+            ) / self.dt
+        else:
+            qdot = rollout.posterior.qdot_mean[:, context_steps - 1]
         z = rollout.posterior.z_mean[:, context_steps - 1]
         rollout_actions = actions[:, context_steps - 1 : context_steps - 1 + horizon]
         alpha = self.transition.nuisance_alpha
@@ -411,8 +653,8 @@ class MechanicsWorldModel(nn.Module):
         imagined_q = torch.stack(q_list, dim=1)
         imagined_qdot = torch.stack(qdot_list, dim=1)
         imagined_z = torch.stack(z_list, dim=1)
-        imagined_features = torch.cat([imagined_q, imagined_qdot, imagined_z], dim=-1)
-        imagined_reconstructions = self.decoder(imagined_features)
+        imagined_features = self.reward_features(imagined_q, imagined_qdot, imagined_z)
+        imagined_reconstructions = self.decode(imagined_q, imagined_qdot, imagined_z)
         return (
             imagined_reconstructions,
             imagined_features,
@@ -447,7 +689,7 @@ class MechanicsWorldModel(nn.Module):
                 n_substeps=self.transition.n_substeps,
             )
             z = alpha * z
-            features_list.append(torch.cat([q, qdot, z], dim=-1))
+            features_list.append(self.reward_features(q, qdot, z))
         return torch.stack(features_list, dim=1)
 
     def initial_posterior(

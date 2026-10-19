@@ -1,0 +1,443 @@
+{
+  "conditions": [
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 842.286341462405,
+          "n": 3,
+          "std": 3.1473856913878855,
+          "values": {
+            "0": 842.9999569991709,
+            "1": 845.0156479724662,
+            "2": 838.8434194155776
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-101041",
+        "1": "learned_control/20261019-103007",
+        "2": "learned_control/20261019-104930"
+      },
+      "superseded": [
+        "learned_control/20261019-095525"
+      ]
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 808.5297328528387,
+          "n": 3,
+          "std": 69.98023441224453,
+          "values": {
+            "0": 850.8795782917808,
+            "1": 727.755303827812,
+            "2": 846.9543164389236
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-102526",
+        "1": "learned_control/20261019-102520",
+        "2": "learned_control/20261019-102525"
+      },
+      "superseded": [
+        "learned_control/20261019-100803"
+      ]
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 1,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 853.2771376629921,
+          "n": 3,
+          "std": 2.306741004735516,
+          "values": {
+            "0": 851.1924869295751,
+            "1": 855.7553347345114,
+            "2": 852.8835913248898
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-101616",
+        "1": "learned_control/20261019-103544",
+        "2": "learned_control/20261019-105505"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 2,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 852.9624329444738,
+          "n": 3,
+          "std": 2.064940701309963,
+          "values": {
+            "0": 850.5828788361089,
+            "1": 854.0207878393785,
+            "2": 854.283632157934
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-102151",
+        "1": "learned_control/20261019-104118",
+        "2": "learned_control/20261019-110038"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 3,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 852.7048667593102,
+          "n": 3,
+          "std": 1.5892870670844519,
+          "values": {
+            "0": 851.0317999935758,
+            "1": 854.1944461433504,
+            "2": 852.8883541410045
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-102732",
+        "1": "learned_control/20261019-104654",
+        "2": "learned_control/20261019-110928"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 1,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 857.1032533062568,
+          "n": 3,
+          "std": 1.2747836327860624,
+          "values": {
+            "0": 855.6330630142129,
+            "1": 857.775271599915,
+            "2": 857.9014253046425
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-110006",
+        "1": "learned_control/20261019-105955",
+        "2": "learned_control/20261019-110009"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 2,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 855.8897508187123,
+          "n": 3,
+          "std": 3.336498217693427,
+          "values": {
+            "0": 852.0393665403742,
+            "1": 857.700374033139,
+            "2": 857.9295118826236
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-113837",
+        "1": "learned_control/20261019-113820",
+        "2": "learned_control/20261019-113842"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-swingup",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 75,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "random_episodes": 60,
+        "round": 3,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "return_mean": {
+          "mean": 855.9010359100686,
+          "n": 3,
+          "std": 2.779177078690107,
+          "values": {
+            "0": 852.7516717588209,
+            "1": 856.9419068610019,
+            "2": 858.0095291103829
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-121303",
+        "1": "learned_control/20261019-121227",
+        "2": "learned_control/20261019-121254"
+      },
+      "superseded": []
+    }
+  ],
+  "patterns": [
+    "return_mean"
+  ]
+}
