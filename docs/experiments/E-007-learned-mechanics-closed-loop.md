@@ -1,11 +1,11 @@
 # E-007 — Planning with learned mechanics on true state
 
-- **Status:** registered (awaiting owner approval)
+- **Status:** approved
 - **Question node:** Q2
 - **Hypotheses:** H-LAG-CTRL, H-LAG-DATA
 - **Budget:** 8 agent-hours, 8 CPU-hours (stop and report at 150%)
 - **Proposed:** 2026-10-19
-- **Approved:** — (owner, date)
+- **Approved:** owner, 2026-10-19 (plan approval; each experiment starts only after its predecessor's decision rule allows it)
 
 ## Question
 Replace the true dynamics in the E-006 planner with a learned model

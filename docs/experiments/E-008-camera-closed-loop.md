@@ -1,11 +1,11 @@
 # E-008 — Camera in the loop: keypoints, estimator, learned Lagrangian
 
-- **Status:** registered (awaiting owner approval)
+- **Status:** approved
 - **Question node:** Q3
 - **Hypotheses:** H-KP, H-CAM-LAG
 - **Budget:** 12 agent-hours, 8 CPU-hours + 1 MPS-hour (stop and report at 150%)
 - **Proposed:** 2026-10-19
-- **Approved:** — (owner, date)
+- **Approved:** owner, 2026-10-19 (plan approval; each experiment starts only after its predecessor's decision rule allows it)
 
 ## Question
 Replace the true state with what a camera gives. Does the E-007

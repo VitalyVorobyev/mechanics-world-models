@@ -1,11 +1,11 @@
 # E-006 — MPPI planner ceiling on the true model
 
-- **Status:** registered (awaiting owner approval)
+- **Status:** approved
 - **Question node:** Q1
 - **Hypotheses:** H-PLAN
 - **Budget:** 4 agent-hours, 1 CPU-hour (stop and report at 150%)
 - **Proposed:** 2026-10-19
-- **Approved:** — (owner, date)
+- **Approved:** owner, 2026-10-19 (plan approval; each experiment starts only after its predecessor's decision rule allows it)
 
 ## Question
 Before any learned model: does the planner itself solve cartpole
