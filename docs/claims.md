@@ -34,6 +34,21 @@ Last full review: 2026-10-19 (see [`review-2026-10-19.md`](review-2026-10-19.md)
 - **Evidence:** `control_episode/20261019-094818`, `control_episode/20261019-094818-1`, `control_episode/20261019-094817`, `control_episode/20261019-094858-1`, `control_episode/20261019-094858`
 - **Hypotheses:** H-PLAN
 
+### C-016 — MPPI over a learned Lagrangian or a learned MLP reaches the true-model ceiling on cartpole
+- **Grade:** A
+- **Claim:** with the E-006 planner, models trained by multi-step rollout
+  regression on true states reach, over 3 training seeds × 5 episodes:
+  - from 60 random-policy episodes (round 0): MLP 842 ± 3, Lagrangian
+    809 ± 70 (seeds 851 / 728 / 847);
+  - after 1–3 rounds of 10 on-policy episodes: MLP 853 ± 2, Lagrangian
+    856–857 (round 3: 856 ± 3), against 861 ± 3 for the true model (C-015).
+  The Lagrangian costs 0.21 s per planning decision against 0.037 s, and
+  about 490 s of training against 54 s.
+- **Scope:** nominal parameters, true state, `actuated_dims=(0,)`,
+  15k training steps, 8-step windows.
+- **Evidence:** `learned_control/20261019-102526`, `learned_control/20261019-102520`, `learned_control/20261019-102525`, `learned_control/20261019-121303`, `learned_control/20261019-121227`, `learned_control/20261019-121254`, `learned_control/20261019-101041`, `learned_control/20261019-103007`, `learned_control/20261019-104930`, `learned_control/20261019-102732`, `learned_control/20261019-104654`, `learned_control/20261019-110928`
+- **Hypotheses:** H-LAG-CTRL, H-LAG-DATA
+
 ## Dynamics on true state (H1b, backlog)
 
 ### C-001 — Lagrangian slot context extrapolates in cart mass; the context MLP does not
