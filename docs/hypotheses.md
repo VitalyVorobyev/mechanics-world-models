@@ -21,14 +21,18 @@ archived verbatim in
 
 | ID | Statement | Status | Evidence | Next test |
 |---|---|---|---|---|
-| H1b | A physical-slot Lagrangian adapts and extrapolates to changed parameters better than black boxes | open: supported on true state against a context MLP for slotted parameters (B); unbracketed; low priority under the charter (Q4) | C-001, C-002, C-003, C-004, C-005 | E-004 (known-equation fit + CRB) |
-| H1b-px | Parameter adaptation survives real perception errors | open: for the learned Lagrangian weakened to about 1.2–1.5× with rejection (C); for the known model, untested | C-008, C-009, C-010 | E-003 (known model, closed loop), E-005 |
-| H-FRAG | The Lagrangian's fragility to heavy-tailed pose errors is caused by the unbounded q̇² Coriolis terms | open, untested | C-008 | E-005 (bounded-velocity Coriolis as a discriminating test) |
-| H-CTRL | Known-model MPC with online parameter fitting solves cartpole swing-up from true state, and recovers after parameter shifts | open | — | E-001 |
-| H-CAM | A standard front end plus an EKF gives a state good enough for that controller in closed loop | open | C-011, C-013 | E-002 |
+| H-PLAN | MPPI over the true MuJoCo model swings up and balances cartpole from true state (return ≥ 800) | open | — | E-006 |
+| H-LAG-CTRL | MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reaches ≥ 700 | open | — | E-007 |
+| H-LAG-DATA | With random data only, the learned Lagrangian plans better than an MLP (structure carries to unseen upright states) | open | — | E-007 (round 0) |
+| H-KP | A keypoint reader trained on renders of uniformly sampled states reads θ to ≤ 1° median, upright included | open | C-011 (heuristic), C-013 (view) | E-008 |
+| H-CAM-LAG | Camera states (and a model learned from camera poses) keep ≥ 85% of the true-state return | open | C-008, C-009 | E-008 |
+| H1a | Structure improves extrapolation to unseen *states* of the same system | open; E-007 round 0 is its first closed-loop test | archived log | E-007 |
+| H1b | A physical-slot Lagrangian adapts and extrapolates to changed parameters better than black boxes | backlog (charter): supported on true state against a context MLP for slotted parameters (B); unbracketed | C-001, C-002, C-003, C-004, C-005 | — |
+| H1b-px | Parameter adaptation survives real perception errors | backlog | C-008, C-009, C-010 | — |
+| H-FRAG | The Lagrangian's fragility to heavy-tailed pose errors is caused by the unbounded q̇² Coriolis terms | backlog; reopens if E-008 fails on outliers | C-008 | — |
+| H-CTRL, H-CAM | Known-model MPC with parameter refits; standard front end + EKF for it | out of scope (abandoned E-001/E-002, re-charter 2026-10-19) | — | — |
 | H-MIS | A missing slot is detectable from adaptation residuals | backlog | C-003 | — |
 | H-RES | Identification accuracy scales with image resolution as the Cramér–Rao bound predicts | backlog | — | — |
-| H1a | Structure improves extrapolation to unseen *states* of the same system | open, not tested directly; the velocity-split check found the H1b gap inside training speeds | archived log | none planned |
 | H1-zs | Structure alone degrades more gracefully under unseen parameters | refuted as a useful question (no parameter input) | archived log | — |
 | H2 | A `(q, q̇, z)` split isolates visual nuisance | out of scope | — | — |
 | H3 | Dissipation matters | out of scope (nominal cartpole damping has no measurable effect) | archived log | — |
@@ -44,6 +48,8 @@ archived verbatim in
 | A-VIEW-1 | The camera sees the cart and pole in every frame | refuted (35% partly out of view) | C-013 |
 | A-FE-1 | A label-free front end can read the pose accurately | partly supported: heuristic ≈ supervised keypoint; gradient through a renderer fails, search works | C-011, C-012 |
 | A-ENC-1 | A per-frame CNN regresses `(x, cos θ, sin θ)` | supported for visible, non-upright poses | archived log |
-| A-KNOWN-1 | The known cartpole model with a few fitted parameters is adequate for control and as an upper bracket | assumed | E-001, E-004 |
-| A-CRB-1 | The Cramér–Rao bound for parameters under the pose-noise model is computable and informative | assumed | E-004, E-005 |
+| A-KNOWN-1 | The known cartpole model with a few fitted parameters is adequate for control and as an upper bracket | backlog (abandoned E-001, E-004) | — |
+| A-CRB-1 | The Cramér–Rao bound for parameters under the pose-noise model is computable and informative | backlog | — |
+| A-COV-1 | Random-policy data covers the states needed for balancing | refuted for the data as collected: 0.3% of frames have cos θ > 0.9 (code survey 2026-10-19, not ledgered); E-007 adds on-policy rounds | — |
+| A-RAIL-2 | The planner can keep the cart off the rail with a cost alone, although the learned models have no rail | assumed | E-006, E-007 |
 | A-DEC-1, A-ROUTE-1, A-DT-1, A-OOD-1, A-OOD-4, A-DATA-1, A-PROBE-1, A-METRIC-1, A-LEAK-1, A-DISS-1, A-LAG-1, A-BASE-1, A-MPS-1, A-ENV-1, D-GAUGE, D-K1 | Pixel world-model assumptions and diagnoses (April–October 2026) | resolved or frozen with the pixel world models | archived log, C-014 |

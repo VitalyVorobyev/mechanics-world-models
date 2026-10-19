@@ -1,6 +1,6 @@
 # E-001 — Known-model MPC with online parameter fitting on true state
 
-- **Status:** registered
+- **Status:** abandoned (never run; superseded by the 2026-10-19 re-charter, see `docs/charter.md`)
 - **Question node:** Q1
 - **Hypotheses:** A-KNOWN-1
 - **Budget:** 6 agent-hours, 4 CPU-hours (stop and report at 150%)
@@ -99,3 +99,7 @@ Report: `return.nominal.true_params`, `return.{shift}.nominal_params`, `return.{
 <!-- report:end -->
 
 ## Belief update
+
+Abandoned 2026-10-19 before any run: the owner clarified that the aim is to
+*learn* the mechanics (cartpole as a showcase), not to control through known
+equations with parameter refits. Kept for reference; see the charter backlog.

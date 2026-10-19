@@ -1,6 +1,6 @@
 # E-002 — Camera-in-the-loop control with a standard front end and state estimator
 
-- **Status:** registered
+- **Status:** abandoned (never run; superseded by the 2026-10-19 re-charter, see `docs/charter.md`)
 - **Question node:** Q2
 - **Hypotheses:** A-VIEW-1, A-FE-1
 - **Budget:** 8 agent-hours, 4 CPU/MPS-hours (stop and report at 150%)
@@ -97,3 +97,7 @@ Report: `return_ratio.heuristic_ekf_84`, `return_ratio.heuristic_ekf_128`, `retu
 <!-- report:end -->
 
 ## Belief update
+
+Abandoned 2026-10-19 before any run: the owner clarified that the aim is to
+*learn* the mechanics (cartpole as a showcase), not to control through known
+equations with parameter refits. Kept for reference; see the charter backlog.

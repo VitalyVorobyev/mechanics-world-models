@@ -1,6 +1,6 @@
 # E-005 — Robust errors-in-variables estimation under real front-end errors (conditional)
 
-- **Status:** registered
+- **Status:** abandoned (never run; superseded by the 2026-10-19 re-charter, see `docs/charter.md`)
 - **Question node:** Q5
 - **Hypotheses:** H-FRAG, H1b-px
 - **Budget:** 8 agent-hours, 6 CPU-hours (stop and report at 150%)
@@ -76,3 +76,7 @@ Report: `cart_mass_rmse_ratio.student_t`, `cart_mass_rmse_ratio.ls_reject`, `nom
 <!-- report:end -->
 
 ## Belief update
+
+Abandoned 2026-10-19 before any run: the owner clarified that the aim is to
+*learn* the mechanics (cartpole as a showcase), not to control through known
+equations with parameter refits. Kept for reference; see the charter backlog.

@@ -3,11 +3,12 @@
 Research code for camera-driven, mechanics-aware control of mechanical
 systems, starting with DeepMind Control `cartpole-swingup`.
 
-The goal: take camera images, be aware of the mechanics of the system
-(an explicit mechanical model whose few physical parameters are
-re-identified when the plant changes), and drive it. The current approach
-is deliberately standard: known-model MPC, a camera front end with a state
-estimator, and online parameter identification. New methods are only
+The goal: take camera images, learn the mechanics of the system (a
+learned Lagrangian over given generalized coordinates), and drive it with
+that learned model. Cartpole swing-up is the simplest showcase; the aim is
+more complex mechanical systems. The pipeline is built from standard
+components: a keypoint pose reader trained on simulator renders, a
+model-based state estimator, and an MPPI planner. New methods are only
 introduced where a measured gap forces them.
 
 - Scope, question tree and stop date: [`docs/charter.md`](docs/charter.md)
@@ -291,12 +292,13 @@ Done:
 
 Ahead (see [`docs/charter.md`](docs/charter.md)):
 
-- E-001: known-model MPC with online parameter fitting on true state
-  (control ceiling, nominal and shifted physics)
-- E-002: camera front end plus EKF in the loop
-- E-003: online parameter identification from camera-estimated states
-- conditional: robust errors-in-variables estimation (E-005); learned
-  structure only if the known model proves inadequate (E-004)
+- E-006: MPPI planner over the true MuJoCo model (control ceiling)
+- E-007: MPPI over a learned Lagrangian (vs an MLP) on true state, with a
+  few rounds of on-policy data
+- E-008: camera in the loop (sim-trained keypoints + estimator), then a
+  closed-loop demo
+- backlog: a more complex system (two- or three-pole cartpole), parameter
+  adaptation
 
 Actor-critic training, replay APIs, zarr storage, and distributed collection
 are deliberately out of scope.

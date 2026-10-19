@@ -1,6 +1,6 @@
 # E-003 — Online parameter identification from camera-estimated states
 
-- **Status:** registered
+- **Status:** abandoned (never run; superseded by the 2026-10-19 re-charter, see `docs/charter.md`)
 - **Question node:** Q3
 - **Hypotheses:** H1b-px
 - **Budget:** 6 agent-hours, 4 CPU-hours (stop and report at 150%)
@@ -73,3 +73,7 @@ Report: `adaptation_recovery.camera_ls`, `adaptation_recovery.camera_augmented_e
 <!-- report:end -->
 
 ## Belief update
+
+Abandoned 2026-10-19 before any run: the owner clarified that the aim is to
+*learn* the mechanics (cartpole as a showcase), not to control through known
+equations with parameter refits. Kept for reference; see the charter backlog.

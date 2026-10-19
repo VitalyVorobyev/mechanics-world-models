@@ -1,26 +1,28 @@
 # Research Charter
 
 The active scope of the project. Change it only by an owner decision,
-recorded in the decision log at the bottom. Why it looks like this:
+recorded in the decision log at the bottom. Background:
 [`review-2026-10-19.md`](review-2026-10-19.md). The April specification is
 archived in [`archive/research_spec_2026-04.md`](archive/research_spec_2026-04.md).
 
-- **Adopted:** 2026-10-19
+- **Adopted:** 2026-10-19 (re-chartered the same day, see the decision log)
 - **Stop date:** 2026-11-02
-- **Decision due on the stop date (D-1):** is the camera-driven controller
-  working? If not, which measured gap blocks it, and is closing that gap
-  worth inventing something for?
+- **Decision due on the stop date (D-1):** does the cartpole demo work
+  (camera → learned Lagrangian → planner, closed loop)? If yes, is the
+  next step a more complex system, and which one? If no, which measured
+  gap blocks it?
 
 ## Goal (owner, 2026-10-19)
 
-Build a system that takes **camera images** as input, is **aware of the
-mechanics** of what it controls, and **drives a mechanical system**. That
-means cartpole first, and later something like a robot arm.
+Build a system that takes **camera images**, **learns the mechanics** of
+what it sees, and uses that learned model to **drive the mechanical
+system**. Cartpole swing-up is the simplest showcase, not the objective.
+The aim is to learn the mechanics of **more complex systems**, whose
+equations nobody writes by hand. Extrapolating physical parameters is not
+an aim.
 
-Novelty is **not** an objective. A paper is not an objective. The question
-is whether the goal can be reached with existing methods. **The default
-answer is yes, and invention is allowed only where a measured gap forces
-it.**
+Novelty is **not** an objective. A paper is not an objective. Standard
+components are the default: invent only where a measured gap forces it.
 
 Secondary goals:
 - deep understanding of what each component contributes;
@@ -29,15 +31,16 @@ Secondary goals:
 
 ## Root question
 
-**Q0.** Can we drive cartpole swing-up and balance from camera images with
-a mechanics-aware pipeline built from standard components? The pipeline
-is: calibrated camera → pose → state estimator → known-model MPC → online
-parameter identification. Does it keep working when the physical
-parameters change? Where exactly does it fall short?
+**Q0.** Can a pipeline that *learns* the mechanics drive cartpole swing-up
+in closed loop from camera images, at nominal physical parameters? The
+pipeline is: camera → keypoint pose reader (trained on simulator renders)
+→ state estimator → learned Lagrangian dynamics over given generalized
+coordinates → MPPI planner with the known task reward.
 
-Being "mechanics-aware" is operationalized as: the controller uses an
-explicit mechanical model, and after a change in the physical parameters
-it recovers by re-identifying a few of them, not by retraining.
+What "learned" means here: the coordinates (x, θ) and which of them is
+actuated are given; the mass matrix, potential, dissipation and actuation
+are learned from data. The reward is the task specification and is not
+learned.
 
 ## Question tree
 
@@ -46,42 +49,41 @@ Every experiment record names one node. A node is closed by a claim in
 
 | Node | Question | Experiments | State |
 |---|---|---|---|
-| Q1 | **Control ceiling on true state.** Does known-model MPC with online parameter fitting swing up and balance cartpole, nominal and under parameter shifts? | E-001 | registered |
-| Q2 | **Camera to state.** With a field of view that keeps the system in view, does a standard front end plus a state estimator give a state good enough for the Q1 controller, in closed loop? | E-002 | registered |
-| Q3 | **Adaptation from vision.** After a parameter change, does online identification from camera-estimated states restore the closed-loop return? | E-003 | registered |
-| Q4 | **Conditional: learned structure.** Only if the known model is unavailable or inadequate: does a learned Lagrangian add anything over the known model plus a fit? | E-004 | registered, low priority |
-| Q5 | **Conditional: robust estimation.** Only if Q2/Q3 fail because of pose outliers or start-state errors: does a robust (Student-t, errors-in-variables) estimator close the gap? | E-005 | registered, conditional |
+| Q1 | **Planner ceiling.** Does MPPI over the true MuJoCo model swing up and balance cartpole from true state? | E-006 | registered |
+| Q2 | **Learned mechanics on true state.** Does MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reach the ceiling? How does an MLP dynamics model do with the same budget? | E-007 | registered |
+| Q3 | **Camera in the loop.** With a sim-trained keypoint reader and a model-based estimator, does the Q2 controller hold its return from camera images, including with a model learned from camera poses? Then the demo. | E-008 | registered |
 
 **Backlog** (not registered; needs a node and an owner decision):
-- detect a misspecified model from residuals;
-- scale with resolution against the Cramér–Rao bound;
-- a structure-matched black-box control for H1b;
-- a second system (acrobot, or a simulated arm with a pendulum payload).
+- a more complex system: dm_control `cartpole.two_poles` /
+  `three_poles` swing-up (checked present in the installed version), or a
+  simulated arm with a pendulum payload;
+- parameter adaptation (H1b; the abandoned E-001, E-003, E-004);
+- robust errors-in-variables estimation (abandoned E-005; reopens if Q3
+  fails on pose outliers);
+- detecting a misspecified model from residuals.
 
 ## References for the goal
 
-These are numbers to compare against, not systems to run on a laptop:
+Numbers to compare against, not systems to run on a laptop:
 - end-to-end pixel agents solve dm_control cartpole-swingup in
   distribution: DreamerV3 and TD-MPC2 report returns of about 800–860;
-- they are known to extrapolate poorly in physical parameters (cRSSM,
-  Prasanna et al. 2024).
-
-The modular pipeline is the standard engineering alternative. That is
-classical adaptive control plus vision, as in UP-OSI (Yu et al. 2017) or
-Jaques et al. 2020.
+- learned Lagrangians have controlled cartpole and a Furuta pendulum
+  from state (DeLaN, Lutter et al. 2019) and a pendulum from pixels
+  (Zhong & Leonard 2020). Q0 is a reproduction-level target.
 
 ## Not in scope
 
 - **Frozen:** the end-to-end pixel world models (RSSM,
-  `MechanicsWorldModel`; 65% of `src/`). They stay in the repo and their
-  tests stay green, but there is no new development. They come back only
-  if Q2 shows that a standard front end cannot read the state.
+  `MechanicsWorldModel`). They stay in the repo and their tests stay
+  green, but there is no new development.
 - training actor-critic or end-to-end RL agents (reference numbers only);
+- physical-parameter shifts and adaptation (backlog);
 - visual-nuisance robustness (H2), dissipation (H3).
 
 ## Budget
 
-- **Whole charter:** two weeks of calendar time, on laptop CPU/MPS only.
+- **Whole charter:** two weeks of calendar time, laptop CPU/MPS only.
+  Planned compute: about 15 CPU-hours plus 1 MPS-hour.
 - **Per experiment:** each record states its agent-hours and
   compute-hours. At 150% of either, the experiment stops and goes back to
   the owner.
@@ -95,3 +97,4 @@ Jaques et al. 2020.
 |---|---|---|---|
 | 2026-10-18 | Stop the pixel gate run; pivot to H1b on true state | owner + agent | archived status log |
 | 2026-10-19 | Stop the OOD world-model comparison; adopt this charter and protocol v2. Goal clarified: camera-driven, mechanics-aware control; novelty not required. E-001…E-005 registered, none approved | owner | [`review-2026-10-19.md`](review-2026-10-19.md) |
+| 2026-10-19 | Re-charter: the aim is to *learn* the mechanics (cartpole is a showcase for more complex systems), not to adapt parameters of known equations. E-001…E-005 abandoned before any run. New tree Q1–Q3 (E-006…E-008). Perception: keypoints trained on simulator renders. Scope: the cartpole demo only; the complex-system step is decided on the stop date | owner | this conversation; plan of 2026-10-19 |

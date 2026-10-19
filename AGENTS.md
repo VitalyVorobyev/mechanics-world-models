@@ -1,17 +1,20 @@
 # Agent Notes
 
-This is a Python research codebase. Goal (owner, 2026-10-19): camera-driven,
-mechanics-aware control of a mechanical system (dm_control cartpole first),
-built from standard components; novelty is not an objective. The public
+This is a Python research codebase. Goal (owner, 2026-10-19): learn the
+mechanics of a system from camera images and drive it with the learned model
+(dm_control cartpole as the showcase, more complex systems as the aim; not
+parameter extrapolation), built from standard components; novelty is not an
+objective. The public
 README is written for GitHub readers; keep detailed setup, debugging, and
 day-to-day commands in `docs/development.md`. The active scope is
 `docs/charter.md` (question tree, budget, stop date, decision log).
 
 ## Project Scope
 
-- Main line: known-model MPC with online parameter identification, then a
-  camera front end plus state estimator in the loop (experiments E-001 →
-  E-003 under `docs/experiments/`).
+- Main line: MPPI planner ceiling on the true model, then MPPI over a
+  learned Lagrangian on true state, then sim-trained keypoints plus a
+  model-based estimator in the loop (experiments E-006 → E-008 under
+  `docs/experiments/`). E-001…E-005 are abandoned.
 - Frozen: the end-to-end pixel world models (RSSM, `MechanicsWorldModel`),
   their trainers and evaluators. Keep their tests green; no new development
   unless the charter reopens them.

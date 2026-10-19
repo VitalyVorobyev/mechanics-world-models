@@ -1,6 +1,6 @@
 # E-004 — Bracket H1b with the known cartpole equations and the Cramér–Rao bound
 
-- **Status:** registered
+- **Status:** abandoned (never run; superseded by the 2026-10-19 re-charter, see `docs/charter.md`)
 - **Question node:** Q4.1
 - **Hypotheses:** H1b, A-KNOWN-1, A-CRB-1
 - **Budget:** 5 agent-hours, 3 CPU-hours (stop and report at 150%)
@@ -113,3 +113,7 @@ Report: `lag_ctx_over_known_exact_ratio_k1_h20`, `{shift}.k1.known_exact.dev_h20
 <!-- report:end -->
 
 ## Belief update
+
+Abandoned 2026-10-19 before any run: the owner clarified that the aim is to
+*learn* the mechanics (cartpole as a showcase), not to control through known
+equations with parameter refits. Kept for reference; see the charter backlog.
