@@ -31,7 +31,7 @@ def test_learned_backend_matches_model_rollout() -> None:
 def test_run_episode_and_training_round_trip() -> None:
     holder: dict = {}
 
-    def full_state(env):
+    def full_state(env, last_action=None):
         holder.setdefault("backend", MujocoBackend(env.physics.model.ptr, 2, 2))
         return get_state(env.physics.model.ptr, env.physics.data.ptr)
 

@@ -11,9 +11,17 @@ Resumable: data, models and evaluations are cached per round under
 ``--cache-dir/<key>/`` (key = config + source fingerprint); rerunning the same
 command skips finished work and does not rewrite finished results.
 
+With ``--pose-source camera`` (E-008 arm B) the model never sees the true
+state: training data are keypoint poses read from rendered frames (velocities
+by central differences of those poses), and every evaluation and collection
+episode runs the camera pipeline (render → reader → fixed-lag estimator
+through the current model → MPPI).
+
 Usage:
   .venv/bin/python scripts/oracles/learned_control.py --experiment E-007 --form lagrangian --seed 0
   .venv/bin/python scripts/oracles/learned_control.py --experiment E-007 --form mlp --seed 0
+  .venv/bin/python scripts/oracles/learned_control.py --experiment E-008 --form lagrangian --seed 0 \
+      --pose-source camera --reader runs/oracles/keypoint_reader/models/<stamp>.pt
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from control.estimator import FixedLagEstimator, learned_dynamics
 from control.learned import (
     LearnedBackend, TrainConfig, concat_states, episodes_to_states, run_episode, train_model, true_state,
 )
@@ -61,6 +70,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=TrainConfig.steps)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=Path("runs/oracles/learned_control/cache"))
+    parser.add_argument("--pose-source", choices=["true", "camera"], default="true")
+    parser.add_argument("--reader", type=Path, help="keypoint reader (camera pose source)")
+    parser.add_argument("--window", type=int, default=12, help="estimator window (camera pose source)")
     add_run_args(parser)
     args = parser.parse_args()
     run = begin_run(args)
@@ -79,6 +91,16 @@ def main() -> None:
         "train": asdict(train_config),
         "mppi": E006_PLANNER.to_dict(),
     }
+    camera = None
+    if args.pose_source == "camera":
+        if args.reader is None:
+            parser.error("--reader is required with --pose-source camera")
+        from camera_control import load_reader  # same directory
+        from control.vision import CameraState, observed_episodes
+
+        reader, spec = load_reader(args.reader)
+        camera = (reader, spec)
+        base_config |= {"pose_source": "camera", "reader": str(args.reader), "estimator_window": args.window}
     cache = args.cache_dir / _cache_key(base_config)
     cache.mkdir(parents=True, exist_ok=True)
     (cache / "config.json").write_text(json.dumps(base_config, indent=2, sort_keys=True) + "\n")
@@ -87,7 +109,10 @@ def main() -> None:
     random_path = cache / "random.npz"
     if not random_path.exists():
         log(f"simulating {args.random_episodes} random-policy episodes")
-        _save_states(random_path, simulate_state_episodes(None, episodes=args.random_episodes, seed=10_000 + args.seed))
+        random_data = simulate_state_episodes(None, episodes=args.random_episodes, seed=10_000 + args.seed)
+        if camera is not None:
+            random_data = observed_episodes(random_data, *camera)
+        _save_states(random_path, random_data)
     parts = [_load_states(random_path)]
 
     for round_index in range(args.rounds + 1):
@@ -112,12 +137,16 @@ def main() -> None:
             (round_dir / "train.json").write_text(json.dumps(train_info) + "\n")
             log(f"round {round_index}: trained in {train_info['train_time_s']:.0f}s, loss {loss:.2e}")
         backend = LearnedBackend(model)
+        if camera is None:
+            state_fn = true_state
+        else:
+            state_fn = CameraState(*camera, FixedLagEstimator(learned_dynamics(model), window=args.window))
 
         if not (round_dir / "result.json").exists():
             episodes = []
             for env_seed in eval_seeds:
                 planner = MPPI(E006_PLANNER, seed=1000 * args.seed + env_seed)
-                episode = run_episode(env_seed, planner, backend, true_state)
+                episode = run_episode(env_seed, planner, backend, state_fn)
                 episodes.append(episode)
                 log(f"round {round_index}: eval seed {env_seed} return {episode.total:.1f} "
                     f"({episode.plan_times.mean() * 1e3:.0f} ms/decision)")
@@ -132,7 +161,7 @@ def main() -> None:
             }
             result = OracleResult(
                 name=NAME,
-                hypotheses=["H-LAG-CTRL", "H-LAG-DATA"],
+                hypotheses=["H-LAG-CTRL", "H-LAG-DATA"] if camera is None else ["H-CAM-LAG"],
                 question="Closed-loop swing-up return of MPPI over a learned model, per data round",
                 config={**base_config, "round": round_index},
                 metrics=metrics,
@@ -155,11 +184,12 @@ def main() -> None:
             for i in range(args.round_episodes):
                 env_seed = 20_000 + 1000 * args.seed + 100 * round_index + i
                 planner = MPPI(E006_PLANNER, seed=env_seed)
-                episode = run_episode(env_seed, planner, backend, true_state,
+                episode = run_episode(env_seed, planner, backend, state_fn,
                                       action_noise=args.collect_noise, noise_seed=env_seed)
                 episodes.append(episode)
                 log(f"round {round_index}: collected episode {i} return {episode.total:.1f}")
-            _save_states(collected_path, episodes_to_states(episodes, data.frame_dt))
+            collected = episodes_to_states(episodes, data.frame_dt)
+            _save_states(collected_path, collected if camera is None else observed_episodes(collected, *camera))
         parts.append(_load_states(collected_path))
 
 

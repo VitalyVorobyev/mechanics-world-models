@@ -8,6 +8,7 @@ import torch
 from control.camera import FULL_VIEW, CameraSpec, render_states
 from control.estimator import FixedLagEstimator, integrate, learned_dynamics, mujoco_dynamics
 from control.keypoints import pose_error_metrics, read_poses, sample_states, train_reader
+from models.mechanics.keypoints import KeypointEncoder
 from oracles.dynamics import DynamicsWrapper
 
 
@@ -76,3 +77,26 @@ def test_mujoco_dynamics_matches_env() -> None:
         state, _ = env.step_state(actions[0, k])
         assert np.allclose(poses[0, k], state["qpos"], atol=1e-9)
     assert np.allclose(q_end[0], state["qpos"]) and np.allclose(v_end[0], state["qvel"])
+
+
+def test_camera_state_and_observed_episodes_shapes() -> None:
+    from control.learned import run_episode
+    from control.mppi import MPPI, MPPIConfig
+    from control.vision import CameraState, central_velocity, observed_episodes
+    from oracles.context import simulate_state_episodes
+
+    torch.manual_seed(0)
+    reader = KeypointEncoder(num_keypoints=2).eval()
+    model = DynamicsWrapper("mlp", dt=0.02, n_substeps=2).eval()
+    from control.learned import LearnedBackend
+
+    state_fn = CameraState(reader, FULL_VIEW, FixedLagEstimator(learned_dynamics(model), window=4))
+    planner = MPPI(MPPIConfig(horizon=3, samples=4), seed=0)
+    episode = run_episode(0, planner, LearnedBackend(model), state_fn)
+    assert len(state_fn.poses) == 500 and episode.qpos.shape == (501, 2)
+
+    data = simulate_state_episodes(None, episodes=1, seed=0)
+    seen = observed_episodes(data, reader, FULL_VIEW)
+    assert seen.qpos.shape == data.qpos.shape and seen.qvel.shape == data.qvel.shape
+    ramp = np.linspace(0, 1, 11)[None, :, None].repeat(2, axis=2)
+    assert np.allclose(central_velocity(ramp, 0.1), 1.0)

@@ -26,8 +26,10 @@ from oracles.common import StateEpisodes
 from oracles.dynamics import DynamicsWrapper, _windows, fit
 
 # Backends take this as the state: the true one wants the full MuJoCo state,
-# learned ones want (q, q̇). ``run_episode`` builds it with ``state_fn``.
-StateFn = Callable[[DmControlPixelEnv], Any]
+# learned ones want (q, q̇). ``run_episode`` builds it with
+# ``state_fn(env, last_action)`` (the camera pipeline needs the action that led
+# to the current frame); an optional ``state_fn.reset()`` runs at episode start.
+StateFn = Callable[[DmControlPixelEnv, Any], Any]
 
 
 class LearnedBackend:
@@ -63,7 +65,7 @@ class LearnedBackend:
         return reward.double().numpy(), cart_x.double().numpy()
 
 
-def true_state(env: DmControlPixelEnv) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+def true_state(env: DmControlPixelEnv, last_action: Any = None) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     state = env.physics_state()
     return state["qpos"], state["qvel"]
 
@@ -108,15 +110,19 @@ def run_episode(
     try:
         env.reset_without_render()
         planner.reset()
+        if hasattr(state_fn, "reset"):
+            state_fn.reset()
+        last_action = None
         qpos, qvel = [env.physics.data.qpos.copy()], [env.physics.data.qvel.copy()]
         actions, rewards, plan_times = [], [], []
         while not env.episode_done():
             start = time.perf_counter()
-            action = planner.plan(backend, state_fn(env))
+            action = planner.plan(backend, state_fn(env, last_action))
             plan_times.append(time.perf_counter() - start)
             if action_noise > 0.0:
                 action = np.clip(action + rng.normal(0.0, action_noise, size=action.shape), -1.0, 1.0)
             state, reward = env.step_state(action)
+            last_action = action
             qpos.append(state["qpos"]), qvel.append(state["qvel"])
             actions.append(np.asarray(action, dtype=np.float64)), rewards.append(reward)
     finally:

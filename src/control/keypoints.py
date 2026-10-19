@@ -29,7 +29,7 @@ def sample_states(n: int, seed: int, x_limit: float = 1.8) -> NDArray[np.float64
 
 
 def _images(batch: NDArray[np.uint8], device: torch.device) -> torch.Tensor:
-    return torch.as_tensor(batch, device=device).permute(0, 3, 1, 2).float() / 255.0
+    return torch.as_tensor(np.ascontiguousarray(batch), device=device).permute(0, 3, 1, 2).float() / 255.0
 
 
 def train_reader(
