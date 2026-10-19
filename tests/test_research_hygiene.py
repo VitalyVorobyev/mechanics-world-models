@@ -176,6 +176,16 @@ def test_report_groups_seeds_supersedes_and_ratios(tmp_path: Path) -> None:
     assert parse_seeds("0-2,7") == [0, 1, 2, 7] and parse_seeds(None) is None
 
 
+def test_report_drops_cache_keys_and_empty_metric_rows(tmp_path: Path) -> None:
+    for i, (seed, metrics) in enumerate([(0, {"err": 1.0}), (1, {"err": 3.0}), (0, {"ret": 5.0})]):
+        config = {"seed": seed, "cache": f"key{i}", "kind": "ret" if "ret" in metrics else "err"}
+        (tmp_path / f"20261019-00000{i}.json").write_text(json.dumps({"config": config, "metrics": metrics}))
+    conditions = group_runs(sorted(tmp_path.glob("*.json")))
+    assert sorted(len(c.runs) for c in conditions) == [1, 2]  # per-seed cache keys do not split a condition
+    table = markdown(conditions, ["err", "ret"])
+    assert table.count("| `err` |") == 1 and table.count("| `ret` |") == 1
+
+
 def test_record_helpers() -> None:
     text = RECORD.format(status="approved")
     assert status(text) == "approved"

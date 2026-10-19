@@ -23,10 +23,13 @@ archived verbatim in
 |---|---|---|---|---|
 | H-PLAN | MPPI over the true MuJoCo model swings up and balances cartpole from true state (return ≥ 800) | supported (861 ± 3) | C-015 | — |
 | H-LAG-CTRL | MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reaches ≥ 700 | supported (856 ± 3 after round 3; 809 ± 70 from random data alone) | C-016 | — |
-| H-LAG-DATA | With random data only, the learned Lagrangian plans better than an MLP (structure carries to unseen upright states) | refuted on cartpole (MLP 842 ± 3 vs Lagrangian 809 ± 70) | C-016 | a harder system (backlog) |
+| H-LAG-DATA | With random data only, the learned Lagrangian plans better than an MLP (structure carries to unseen upright states) | refuted on cartpole (MLP 842 ± 3 vs Lagrangian 809 ± 70) | C-016 | two poles: H-LAG-2P (E-010) |
 | H-KP | A keypoint reader trained on renders of uniformly sampled states reads θ to ≤ 1° median, upright included | supported (0.19° upright) | C-017 | — |
 | H-CAM-LAG | Camera states (and a model learned from camera poses) keep ≥ 85% of the true-state return | supported (0.977 for the camera-learned model) | C-018 | — |
-| H1a | Structure improves extrapolation to unseen *states* of the same system | not supported in closed loop on cartpole (E-007 round 0) | C-016 | a harder system (backlog) |
+| H-PLAN-2P | MPPI over the true model swings up the two-pole cartpole (return ≥ 600) | refuted (422 ± 44: swings up, does not hold balance) | C-019 | a better planner (new record) |
+| H-LAG-2P | On two poles, a learned Lagrangian plans better than an MLP from the same small data (≥ 50 points at round 0 or 1) | refuted (round 0 +1, round 1 −19; +29 only at round 3, not significant) | C-020 | owner decision |
+| H-LAG-PRED-2P | On two poles, a Lagrangian learned from random data predicts unseen swing-up states at least 2× better than an MLP over 1 s | refuted (worse: 0.58 vs 0.46) | C-021 | — |
+| H1a | Structure improves extrapolation to unseen *states* of the same system | not supported: cartpole closed loop (E-007 round 0); two poles, open loop worse than an MLP (E-010) | C-016, C-021 | — |
 | H1b | A physical-slot Lagrangian adapts and extrapolates to changed parameters better than black boxes | backlog (charter): supported on true state against a context MLP for slotted parameters (B); unbracketed | C-001, C-002, C-003, C-004, C-005 | — |
 | H1b-px | Parameter adaptation survives real perception errors | backlog | C-008, C-009, C-010 | — |
 | H-FRAG | The Lagrangian's fragility to heavy-tailed pose errors is caused by the unbounded q̇² Coriolis terms | backlog; reopens if E-008 fails on outliers | C-008 | — |

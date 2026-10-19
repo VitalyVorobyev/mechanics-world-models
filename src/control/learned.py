@@ -19,7 +19,7 @@ import torch
 from numpy.typing import NDArray
 
 from control.mppi import MPPI, Backend
-from control.reward import swingup_reward
+from control.reward import poles_reward, upright_all
 from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
 from models.mechanics.lagrangian import forward_acceleration
 from oracles.common import StateEpisodes
@@ -60,7 +60,7 @@ class LearnedBackend:
             for _ in range(self.model.n_substeps):  # same update as semi_implicit_euler_step
                 qdot = qdot + h * forward_acceleration(self.dynamics, q, qdot, u)
                 q = q + h * qdot
-                reward[:, k] += swingup_reward(q[:, 0], torch.cos(q[:, 1]), qdot[:, 1], u[:, 0])
+                reward[:, k] += poles_reward(q[:, 0], q[:, 1:], qdot[:, 1:], u[:, 0])
             cart_x[:, k] = q[:, 0]
         return reward.double().numpy(), cart_x.double().numpy()
 
@@ -72,8 +72,8 @@ def true_state(env: DmControlPixelEnv, last_action: Any = None) -> tuple[NDArray
 
 @dataclass
 class Episode:
-    qpos: NDArray[np.float64]      # [N+1, 2]
-    qvel: NDArray[np.float64]      # [N+1, 2]
+    qpos: NDArray[np.float64]      # [N+1, 1 + P]
+    qvel: NDArray[np.float64]      # [N+1, 1 + P]
     actions: NDArray[np.float64]   # [N, 1]
     rewards: NDArray[np.float64]   # [N]
     plan_times: NDArray[np.float64]
@@ -83,11 +83,11 @@ class Episode:
         return float(self.rewards.sum())
 
     def metrics(self) -> dict[str, float]:
-        cos_theta = np.cos(self.qpos[1:, 1])
+        upright = upright_all(self.qpos[1:, 1:])
         return {
             "return": self.total,
             "decision_time_mean_s": float(self.plan_times.mean()),
-            "upright_fraction_second_half": float(np.mean(cos_theta[len(cos_theta) // 2:] > 0.95)),
+            "upright_fraction_second_half": float(np.mean(upright[len(upright) // 2:])),
             "max_abs_x": float(np.abs(self.qpos[:, 0]).max()),
             "rail_fraction": float(np.mean(np.abs(self.qpos[:, 0]) > 1.75)),
         }
@@ -102,10 +102,11 @@ def run_episode(
     action_repeat: int = 2,
     action_noise: float = 0.0,
     noise_seed: int = 0,
+    env_name: str = "cartpole-swingup",
 ) -> Episode:
     """One closed-loop episode; ``action_noise`` (Gaussian std) is added to executed actions only."""
 
-    env = DmControlPixelEnv(PixelEnvConfig(env_name="cartpole-swingup", seed=env_seed, action_repeat=action_repeat))
+    env = DmControlPixelEnv(PixelEnvConfig(env_name=env_name, seed=env_seed, action_repeat=action_repeat))
     rng = np.random.default_rng(noise_seed)
     try:
         env.reset_without_render()
@@ -159,14 +160,21 @@ class TrainConfig:
     rail_margin: float = 0.2
 
 
+def make_model(form: str, config: TrainConfig, dt: float, q_dim: int = 2) -> DynamicsWrapper:
+    """An untrained model of ``form`` for a cart with ``q_dim - 1`` poles (every pole angle is S¹)."""
+
+    return DynamicsWrapper(
+        form, hidden=config.hidden, dt=dt, n_substeps=config.n_substeps,
+        actuated_dims=(0,) if form == "lagrangian" else None,
+        q_dim=q_dim, angle_dims=tuple(range(1, q_dim)),
+    )
+
+
 def train_model(form: str, data: StateEpisodes, config: TrainConfig, seed: int) -> tuple[DynamicsWrapper, float]:
     """A fresh model of ``form`` fitted to ``data``; returns it and the final batch loss."""
 
     torch.manual_seed(seed)
-    model = DynamicsWrapper(
-        form, hidden=config.hidden, dt=data.frame_dt, n_substeps=config.n_substeps,
-        actuated_dims=(0,) if form == "lagrangian" else None,
-    )
+    model = make_model(form, config, data.frame_dt, q_dim=data.qpos.shape[-1])
     windows = _windows(data, config.train_horizon, rail_margin=config.rail_margin)
     parameters = [p for name, p in model.named_parameters() if name not in ("mass_offset", "log_gain")]
     loss = fit(
@@ -184,10 +192,7 @@ def load_round_model(round_dir) -> DynamicsWrapper:
 
     round_dir = Path(round_dir)
     config = json.loads((round_dir.parent / "config.json").read_text())
-    train = config["train"]
-    model = DynamicsWrapper(
-        config["form"], hidden=train["hidden"], dt=0.02, n_substeps=train["n_substeps"],
-        actuated_dims=(0,) if config["form"] == "lagrangian" else None,
-    )
+    train = TrainConfig(**config["train"])
+    model = make_model(config["form"], train, 0.02, q_dim=config.get("q_dim", 2))
     model.load_state_dict(torch.load(round_dir / "model.pt"))
     return model.eval()

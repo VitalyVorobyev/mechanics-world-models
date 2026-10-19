@@ -6,7 +6,9 @@ import numpy as np
 import torch
 
 from control.mppi import MPPI, MPPIConfig
-from control.reward import rail_penalty, swingup_reward
+import pytest
+
+from control.reward import poles_reward, rail_penalty, swingup_reward
 from control.true_model import MujocoBackend, get_state
 from envs.dm_control_pixels import DmControlPixelEnv, PixelEnvConfig
 
@@ -22,6 +24,28 @@ def test_reward_matches_dm_control() -> None:
         assert abs(reward - ours) < 1e-12
 
 
+@pytest.mark.parametrize("task", ["two_poles", "three_poles"])
+def test_poles_reward_matches_dm_control(task: str) -> None:
+    env = DmControlPixelEnv(PixelEnvConfig(env_name=f"cartpole-{task}", seed=3, action_repeat=1))
+    env.reset_without_render()
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        action = rng.uniform(-1.0, 1.0, size=1)
+        state, reward = env.step_state(action)
+        ours = poles_reward(state["qpos"][0], state["qpos"][1:], state["qvel"][1:], action[0])
+        assert abs(reward - ours) < 1e-12
+
+
+def test_poles_reward_reduces_to_one_pole_and_accepts_torch() -> None:
+    rng = np.random.default_rng(1)
+    x, th, thd, u = rng.normal(size=(4, 50))
+    assert np.allclose(poles_reward(x, th[:, None], thd[:, None], u), swingup_reward(x, np.cos(th), thd, u))
+    angles, vel = rng.normal(size=(2, 50, 3))
+    expected = poles_reward(x, angles, vel, u)
+    got = poles_reward(*[torch.as_tensor(a) for a in (x, angles, vel, u)]).numpy()
+    assert np.allclose(got, expected)
+
+
 def test_reward_accepts_torch() -> None:
     args = [torch.tensor([0.3]), torch.tensor([0.9]), torch.tensor([1.5]), torch.tensor([-0.4])]
     expected = swingup_reward(*[a.numpy() for a in args])
@@ -32,8 +56,9 @@ def test_rail_penalty_is_zero_inside_limit() -> None:
     assert np.allclose(rail_penalty(np.array([-1.0, 0.0, 1.5, 1.7, -1.9]), 1.6), [0.0, 0.0, 0.0, 0.1, 0.3])
 
 
-def test_mujoco_backend_matches_env_steps() -> None:
-    env = DmControlPixelEnv(PixelEnvConfig(seed=5, action_repeat=2))
+@pytest.mark.parametrize("env_name", ["cartpole-swingup", "cartpole-two_poles"])
+def test_mujoco_backend_matches_env_steps(env_name: str) -> None:
+    env = DmControlPixelEnv(PixelEnvConfig(env_name=env_name, seed=5, action_repeat=2))
     env.reset_without_render()
     physics = env.physics
     backend = MujocoBackend(physics.model.ptr, action_repeat=2, nthread=2)

@@ -60,10 +60,13 @@ CONTEXT_MODES = ("lag_ctx", "lag_full", "mlp_ctx", "mlp_full")
 
 def simulate_state_episodes(
     scales: dict[str, float] | None, *, episodes: int, seed: int, action_repeat: int = 2,
+    env_name: str = "cartpole-swingup",
 ) -> StateEpisodes:
     """Random-policy state trajectories (no rendering), same policy as the collector."""
 
-    env = DmControlPixelEnv(PixelEnvConfig(action_repeat=action_repeat, seed=seed, physics_param_scales=scales))
+    env = DmControlPixelEnv(
+        PixelEnvConfig(env_name=env_name, action_repeat=action_repeat, seed=seed, physics_param_scales=scales),
+    )
     rng = np.random.default_rng(seed)
     qpos, qvel, actions = [], [], []
     try:

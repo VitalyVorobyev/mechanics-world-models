@@ -1,0 +1,2099 @@
+{
+  "conditions": [
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.07759953919138256,
+          "n": 3,
+          "std": 0.00523241126345692,
+          "values": {
+            "0": 0.08364057933024596,
+            "1": 0.07449239833673346,
+            "2": 0.07466563990716822
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 192.1240449659792,
+          "n": 3,
+          "std": 23.241238366017594,
+          "values": {
+            "0": 208.6888836982095,
+            "1": 165.55611906825683,
+            "2": 202.12713213147126
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.004,
+          "n": 3,
+          "std": 0.004995998398718719,
+          "values": {
+            "0": 0.0024000000000000002,
+            "1": 0.0,
+            "2": 0.009600000000000001
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-204328",
+        "1": "learned_control/20261019-204746",
+        "2": "learned_control/20261019-204747"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 1,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.08942824476066745,
+          "n": 3,
+          "std": 0.02836503440997946,
+          "values": {
+            "0": 0.12218111193981022,
+            "1": 0.07294025070142815,
+            "2": 0.07316337164076395
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 262.00045420811426,
+          "n": 3,
+          "std": 18.96900714517227,
+          "values": {
+            "0": 283.31069167147535,
+            "1": 246.96029653533316,
+            "2": 255.73037441753436
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.008533333333333332,
+          "n": 3,
+          "std": 0.0020132891827388663,
+          "values": {
+            "0": 0.0064,
+            "1": 0.008799999999999999,
+            "2": 0.0104
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-205912",
+        "1": "learned_control/20261019-205748",
+        "2": "learned_control/20261019-205751"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 2,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.07807689630229918,
+          "n": 3,
+          "std": 0.003408163060700312,
+          "values": {
+            "0": 0.08201076987872948,
+            "1": 0.07601480457821744,
+            "2": 0.07620511444995064
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 318.9507097419469,
+          "n": 3,
+          "std": 28.323775385777996,
+          "values": {
+            "0": 306.1382058503349,
+            "1": 299.2971063519194,
+            "2": 351.41681702358653
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.034666666666666665,
+          "n": 3,
+          "std": 0.022829221040879456,
+          "values": {
+            "0": 0.036,
+            "1": 0.0112,
+            "2": 0.056799999999999996
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-211032",
+        "1": "learned_control/20261019-210816",
+        "2": "learned_control/20261019-210821"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.6207231962540343,
+          "n": 3,
+          "std": 0.010315868585821331,
+          "values": {
+            "0": 0.6326177933516854,
+            "1": 0.614222666656418,
+            "2": 0.6153291287539993
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 193.35672437920584,
+          "n": 3,
+          "std": 18.55145662822175,
+          "values": {
+            "0": 199.38499258963208,
+            "1": 172.5408619922734,
+            "2": 208.14431855571206
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.0,
+          "n": 3,
+          "std": 0.0,
+          "values": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-211517",
+        "1": "learned_control/20261019-211918",
+        "2": "learned_control/20261019-211921"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 3,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.07688294856456342,
+          "n": 3,
+          "std": 0.0014051595148446704,
+          "values": {
+            "0": 0.07850303697168129,
+            "1": 0.07599571351310005,
+            "2": 0.07615009520890889
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 317.8334128351732,
+          "n": 3,
+          "std": 19.07204029212216,
+          "values": {
+            "0": 328.8762860693796,
+            "1": 328.8130044876739,
+            "2": 295.8109479484661
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.024533333333333334,
+          "n": 3,
+          "std": 0.027086035762608995,
+          "values": {
+            "0": 0.0536,
+            "1": 0.02,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-212139",
+        "1": "learned_control/20261019-211843",
+        "2": "learned_control/20261019-211851"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 20,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.07503992237471199,
+          "n": 3,
+          "std": 0.00013223361740662723,
+          "values": {
+            "0": 0.07488780488667544,
+            "1": 0.07512742366860038,
+            "2": 0.07510453856886015
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 184.8854385243952,
+          "n": 3,
+          "std": 1.2952822011680518,
+          "values": {
+            "0": 186.0516822513549,
+            "1": 185.113280690733,
+            "2": 183.49135263109767
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.0016,
+          "n": 3,
+          "std": 0.0027712812921102037,
+          "values": {
+            "0": 0.0048000000000000004,
+            "1": 0.0,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-212305",
+        "1": "learned_control/20261019-212711",
+        "2": "learned_control/20261019-213117"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "mlp",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 200,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.07391308860376981,
+          "n": 3,
+          "std": 0.00012022115194891587,
+          "values": {
+            "0": 0.07392233651869465,
+            "1": 0.0740284187309735,
+            "2": 0.0737885105616413
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 201.7138862848677,
+          "n": 3,
+          "std": 10.135639302489363,
+          "values": {
+            "0": 212.2527795583811,
+            "1": 200.85238480399576,
+            "2": 192.03649449222627
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.005866666666666667,
+          "n": 3,
+          "std": 0.0068039204384923065,
+          "values": {
+            "0": 0.013600000000000001,
+            "1": 0.0032,
+            "2": 0.0008
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-213530",
+        "1": "learned_control/20261019-213942",
+        "2": "learned_control/20261019-214354"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 20,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.5651029228619203,
+          "n": 3,
+          "std": 0.025159384596218005,
+          "values": {
+            "0": 0.5924204586198437,
+            "1": 0.560006211590243,
+            "2": 0.5428820983756741
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 188.65714180970312,
+          "n": 3,
+          "std": 22.083820100230596,
+          "values": {
+            "0": 169.10640138001037,
+            "1": 184.2543061540089,
+            "2": 212.6107178950901
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.0,
+          "n": 3,
+          "std": 0.0,
+          "values": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-215543",
+        "1": "learned_control/20261019-222818",
+        "2": "learned_control/20261019-225952"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 1,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.5699064091557849,
+          "n": 3,
+          "std": 0.002212488628257211,
+          "values": {
+            "0": 0.5708247017088346,
+            "1": 0.5673826418437121,
+            "2": 0.5715118839148083
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 242.7492304404136,
+          "n": 3,
+          "std": 29.989644633782245,
+          "values": {
+            "0": 220.5407010366333,
+            "1": 230.84339515226438,
+            "2": 276.8635951323432
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.0,
+          "n": 3,
+          "std": 0.0,
+          "values": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-223747",
+        "1": "learned_control/20261019-224144",
+        "2": "learned_control/20261019-224201"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 200,
+        "round": 0,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.5508286701796615,
+          "n": 3,
+          "std": 0.008577112271229589,
+          "values": {
+            "0": 0.5509875109676272,
+            "1": 0.5593252588876058,
+            "2": 0.5421732406837516
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 215.87320552660762,
+          "n": 3,
+          "std": 17.608327147874355,
+          "values": {
+            "0": 199.44612668391392,
+            "1": 213.7104982532911,
+            "2": 234.46299164261785
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.0,
+          "n": 3,
+          "std": 0.0,
+          "values": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 0.0
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-233219",
+        "1": "learned_control/20261020-000513",
+        "2": "learned_control/20261020-003657"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 2,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.5723269433297838,
+          "n": 3,
+          "std": 0.0012180069625587072,
+          "values": {
+            "0": 0.571780814320466,
+            "1": 0.5714775781975711,
+            "2": 0.5737224374713142
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 322.7515459789892,
+          "n": 3,
+          "std": 20.224916376999968,
+          "values": {
+            "0": 299.6029034817126,
+            "1": 331.6514504021117,
+            "2": 337.0002840531432
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.022133333333333335,
+          "n": 3,
+          "std": 0.01520701592467547,
+          "values": {
+            "0": 0.0072,
+            "1": 0.0376,
+            "2": 0.0216
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261019-235839",
+        "1": "learned_control/20261020-000244",
+        "2": "learned_control/20261020-000326"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "collect_noise": 0.3,
+        "env": "cartpole-two_poles",
+        "eval_seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "form": "lagrangian",
+        "mppi": {
+          "action_dim": 1,
+          "horizon": 150,
+          "iterations": 1,
+          "noise_std": 0.5,
+          "rail_limit": 1.6,
+          "rail_weight": 10.0,
+          "samples": 512,
+          "temperature": 1.0
+        },
+        "q_dim": 3,
+        "random_episodes": 60,
+        "round": 3,
+        "round_episodes": 10,
+        "train": {
+          "batch_size": 128,
+          "hidden": 64,
+          "lr": 0.001,
+          "n_substeps": 2,
+          "rail_margin": 0.2,
+          "steps": 15000,
+          "train_horizon": 8
+        }
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": 0.5350083625613945,
+          "n": 3,
+          "std": 0.0038925995101543455,
+          "values": {
+            "0": 0.5394226006901823,
+            "1": 0.5335348695960594,
+            "2": 0.5320676173979416
+          }
+        },
+        "pred_error_1s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h10": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h25": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "return_mean": {
+          "mean": 346.6562226448289,
+          "n": 3,
+          "std": 10.152046906964568,
+          "values": {
+            "0": 351.89192904728395,
+            "1": 353.1215731874177,
+            "2": 334.9551656997852
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": 0.018933333333333333,
+          "n": 3,
+          "std": 0.007433258594542056,
+          "values": {
+            "0": 0.027200000000000002,
+            "1": 0.0168,
+            "2": 0.0128
+          }
+        }
+      },
+      "runs": {
+        "0": "learned_control/20261020-011651",
+        "1": "learned_control/20261020-012041",
+        "2": "learned_control/20261020-012126"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-1.npz"
+        ],
+        "form": "mlp",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 0,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.45822620391845703,
+          "n": 3,
+          "std": 0.039819459174164365,
+          "values": {
+            "0": 0.503421425819397,
+            "1": 0.44295206665992737,
+            "2": 0.42830511927604675
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.03821725398302078,
+          "n": 3,
+          "std": 0.001933466557630484,
+          "values": {
+            "0": 0.03746567294001579,
+            "1": 0.04041365906596184,
+            "2": 0.03677242994308472
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.15831363697846731,
+          "n": 3,
+          "std": 0.008067364306915799,
+          "values": {
+            "0": 0.15438352525234222,
+            "1": 0.16759292781352997,
+            "2": 0.15296445786952972
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.1511025925477346,
+          "n": 3,
+          "std": 0.016276538536462326,
+          "values": {
+            "0": 0.14123889803886414,
+            "1": 0.14217960834503174,
+            "2": 0.16988927125930786
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.33174816767374676,
+          "n": 3,
+          "std": 0.028421875552049856,
+          "values": {
+            "0": 0.32262754440307617,
+            "1": 0.3090062141418457,
+            "2": 0.36361074447631836
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.610507736603419,
+          "n": 3,
+          "std": 0.12530985151684715,
+          "values": {
+            "0": 0.6808257102966309,
+            "1": 0.6848663091659546,
+            "2": 0.4658311903476715
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261019-205351-1",
+        "1": "prediction_error/20261019-205351-2",
+        "2": "prediction_error/20261019-205350-1"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-1.npz"
+        ],
+        "form": "lagrangian",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 0,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.577316681543986,
+          "n": 3,
+          "std": 0.11589940334398367,
+          "values": {
+            "0": 0.512934684753418,
+            "1": 0.507901132106781,
+            "2": 0.711114227771759
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.05029491583506266,
+          "n": 3,
+          "std": 0.013661899714174348,
+          "values": {
+            "0": 0.05141367390751839,
+            "1": 0.03610803559422493,
+            "2": 0.06336303800344467
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.2053216596444448,
+          "n": 3,
+          "std": 0.05703265118659285,
+          "values": {
+            "0": 0.18484623730182648,
+            "1": 0.16135336458683014,
+            "2": 0.26976537704467773
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.1608514686425527,
+          "n": 3,
+          "std": 0.029499050002302466,
+          "values": {
+            "0": 0.15670473873615265,
+            "1": 0.19220447540283203,
+            "2": 0.1336451917886734
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.4883697231610616,
+          "n": 3,
+          "std": 0.12261025786789918,
+          "values": {
+            "0": 0.40027832984924316,
+            "1": 0.4364299774169922,
+            "2": 0.6284008622169495
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.6441021958986918,
+          "n": 3,
+          "std": 0.19162542372200436,
+          "values": {
+            "0": 0.5546875,
+            "1": 0.5135267376899719,
+            "2": 0.8640923500061035
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261019-205351",
+        "1": "prediction_error/20261019-205350",
+        "2": "prediction_error/20261019-205350-2"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-1.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz"
+        ],
+        "form": "lagrangian",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 3,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.24040497342745462,
+          "n": 3,
+          "std": 0.02549640802006553,
+          "values": {
+            "0": 0.26225098967552185,
+            "1": 0.21239013969898224,
+            "2": 0.2465737909078598
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.007824596328039965,
+          "n": 3,
+          "std": 0.0010513063541321243,
+          "values": {
+            "0": 0.008908738382160664,
+            "1": 0.006809532642364502,
+            "2": 0.0077555179595947266
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.0498978483180205,
+          "n": 3,
+          "std": 0.011520996860257031,
+          "values": {
+            "0": 0.062434494495391846,
+            "1": 0.039774950593709946,
+            "2": 0.04748409986495972
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.029649568100770313,
+          "n": 3,
+          "std": 0.001493463789575696,
+          "values": {
+            "0": 0.030852138996124268,
+            "1": 0.02797786146402359,
+            "2": 0.030118703842163086
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.15499234199523926,
+          "n": 3,
+          "std": 0.014629309920608229,
+          "values": {
+            "0": 0.16818571090698242,
+            "1": 0.13925957679748535,
+            "2": 0.15753173828125
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.4507041275501251,
+          "n": 3,
+          "std": 0.060906581263232805,
+          "values": {
+            "0": 0.5102674961090088,
+            "1": 0.38853779435157776,
+            "2": 0.4533070921897888
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261020-012205",
+        "1": "prediction_error/20261020-012205-1",
+        "2": "prediction_error/20261020-012205-2"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-1.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz"
+        ],
+        "form": "mlp",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 3,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.23168774942557016,
+          "n": 3,
+          "std": 0.014851653124647953,
+          "values": {
+            "0": 0.24680723249912262,
+            "1": 0.2171192616224289,
+            "2": 0.231136754155159
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.00935293392588695,
+          "n": 3,
+          "std": 0.0009584783661843296,
+          "values": {
+            "0": 0.009434878826141357,
+            "1": 0.01026780903339386,
+            "2": 0.00835611391812563
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.056055180728435516,
+          "n": 3,
+          "std": 0.004429327857150369,
+          "values": {
+            "0": 0.05852267146110535,
+            "1": 0.05870119854807854,
+            "2": 0.050941672176122665
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.08721159398555756,
+          "n": 3,
+          "std": 0.011506067080134668,
+          "values": {
+            "0": 0.09394481778144836,
+            "1": 0.09376402199268341,
+            "2": 0.0739259421825409
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.16848047574361166,
+          "n": 3,
+          "std": 0.015261226176925142,
+          "values": {
+            "0": 0.18436813354492188,
+            "1": 0.15393424034118652,
+            "2": 0.16713905334472656
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.38143761952718097,
+          "n": 3,
+          "std": 0.03258719369946982,
+          "values": {
+            "0": 0.40500932931900024,
+            "1": 0.3442508578300476,
+            "2": 0.3950526714324951
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261020-012205-3",
+        "1": "prediction_error/20261020-012205-4",
+        "2": "prediction_error/20261020-012205-5"
+      },
+      "superseded": []
+    }
+  ],
+  "patterns": [
+    "return_mean",
+    "upright_fraction_second_half",
+    "decision_time_mean_s",
+    "pred_error_1s",
+    "pred_error_h10",
+    "pred_error_h25",
+    "pred_error_h50_q0",
+    "pred_error_h50_q1",
+    "pred_error_h50_q2"
+  ]
+}
