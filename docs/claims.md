@@ -92,6 +92,46 @@ Last full review: 2026-10-19 (see [`review-2026-10-19.md`](review-2026-10-19.md)
 - **Evidence:** `control_episode/20261019-203551-4`, `control_episode/20261019-203551`, `control_episode/20261019-203551-2`, `control_episode/20261019-203551-3`, `control_episode/20261019-203551-1`
 - **Hypotheses:** H-PLAN-2P
 
+### C-020 — On the two-pole cartpole, a learned Lagrangian plans no better than an MLP from the same data, at 7× the planning cost
+- **Grade:** A
+- **Claim:** with the frozen E-009 planner and the E-007 training (3 seeds,
+  5 evaluation episodes each, sample std), returns for the learned
+  Lagrangian and the MLP are:
+
+  | data | Lagrangian | MLP |
+  |---|---|---|
+  | 60 random episodes (round 0) | 193 ± 19 | 192 ± 23 |
+  | + 10 MPPI episodes (round 1) | 243 ± 30 | 262 ± 19 |
+  | + 20 (round 2) | 323 ± 20 | 319 ± 28 |
+  | + 30 (round 3) | 347 ± 10 | 318 ± 19 |
+  | 20 random episodes | 189 ± 22 | 185 ± 1 |
+  | 200 random episodes | 216 ± 18 | 202 ± 10 |
+
+  The true-model ceiling is 422 (C-019). Neither model balances both
+  poles: both are upright in at most 5% of second-half frames. Round 3 is
+  the only point where the Lagrangian leads on every seed (+29; Welch
+  t ≈ 2.3 on about 3 degrees of freedom, not significant). Planning cost
+  per decision: Lagrangian 0.54–0.62 s, MLP 0.074–0.089 s.
+- **Scope:** nominal parameters, true state, the E-009 planner (which
+  itself does not hold two poles up), one network size and training
+  budget.
+- **Evidence:** round 0 `learned_control/20261019-211517`, `learned_control/20261019-211918`, `learned_control/20261019-211921` vs `learned_control/20261019-204328`, `learned_control/20261019-204746`, `learned_control/20261019-204747`; round 1 `learned_control/20261019-223747`, `learned_control/20261019-224144`, `learned_control/20261019-224201` vs `learned_control/20261019-205912`, `learned_control/20261019-205748`, `learned_control/20261019-205751`; round 3 `learned_control/20261020-011651`, `learned_control/20261020-012041`, `learned_control/20261020-012126` vs `learned_control/20261019-212139`, `learned_control/20261019-211843`, `learned_control/20261019-211851`; the rest in `results/E-010/summary.json`
+- **Hypotheses:** H-LAG-2P
+
+### C-021 — From random data, the learned two-pole Lagrangian predicts swing-up states worse than an MLP
+- **Grade:** A (round 0); the round-3 numbers are post hoc
+- **Claim:** on 230 one-second windows of the five E-009 true-model
+  episodes (swing-up and balance, rail margin 0.2 m), the median error of
+  a 50-decision open-loop prediction, averaged over (x, θ1, θ2), is
+  0.58 ± 0.12 for the Lagrangian and 0.46 ± 0.04 for the MLP
+  (round-0 models: 60 random episodes, 3 seeds). The Lagrangian is worse
+  at every horizon (0.2 s: 0.050 vs 0.038) and on every coordinate, most
+  on θ1 (0.49 vs 0.33 rad). After round 3 both are at 0.24 (0.240 vs
+  0.232; post hoc).
+- **Scope:** as C-020.
+- **Evidence:** `prediction_error/20261019-205351`, `prediction_error/20261019-205350`, `prediction_error/20261019-205350-2` vs `prediction_error/20261019-205351-1`, `prediction_error/20261019-205351-2`, `prediction_error/20261019-205350-1`; post hoc `prediction_error/20261020-012205` … `prediction_error/20261020-012205-5`
+- **Hypotheses:** H-LAG-PRED-2P, H1a
+
 ## Dynamics on true state (H1b, backlog)
 
 ### C-001 — Lagrangian slot context extrapolates in cart mass; the context MLP does not

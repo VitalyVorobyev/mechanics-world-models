@@ -1851,6 +1851,238 @@
         "2": "prediction_error/20261019-205350-2"
       },
       "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-1.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz"
+        ],
+        "form": "lagrangian",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 3,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.24040497342745462,
+          "n": 3,
+          "std": 0.02549640802006553,
+          "values": {
+            "0": 0.26225098967552185,
+            "1": 0.21239013969898224,
+            "2": 0.2465737909078598
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.007824596328039965,
+          "n": 3,
+          "std": 0.0010513063541321243,
+          "values": {
+            "0": 0.008908738382160664,
+            "1": 0.006809532642364502,
+            "2": 0.0077555179595947266
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.0498978483180205,
+          "n": 3,
+          "std": 0.011520996860257031,
+          "values": {
+            "0": 0.062434494495391846,
+            "1": 0.039774950593709946,
+            "2": 0.04748409986495972
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.029649568100770313,
+          "n": 3,
+          "std": 0.001493463789575696,
+          "values": {
+            "0": 0.030852138996124268,
+            "1": 0.02797786146402359,
+            "2": 0.030118703842163086
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.15499234199523926,
+          "n": 3,
+          "std": 0.014629309920608229,
+          "values": {
+            "0": 0.16818571090698242,
+            "1": 0.13925957679748535,
+            "2": 0.15753173828125
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.4507041275501251,
+          "n": 3,
+          "std": 0.060906581263232805,
+          "values": {
+            "0": 0.5102674961090088,
+            "1": 0.38853779435157776,
+            "2": 0.4533070921897888
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261020-012205",
+        "1": "prediction_error/20261020-012205-1",
+        "2": "prediction_error/20261020-012205-2"
+      },
+      "superseded": []
+    },
+    {
+      "config": {
+        "env": "cartpole-two_poles",
+        "episodes": [
+          "runs/oracles/control_episode/20261019-203551-1.npz",
+          "runs/oracles/control_episode/20261019-203551-2.npz",
+          "runs/oracles/control_episode/20261019-203551-3.npz",
+          "runs/oracles/control_episode/20261019-203551-4.npz",
+          "runs/oracles/control_episode/20261019-203551.npz"
+        ],
+        "form": "mlp",
+        "horizon": 50,
+        "rail_margin": 0.2,
+        "random_episodes": 60,
+        "round": 3,
+        "stride": 10
+      },
+      "metrics": {
+        "decision_time_mean_s": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "pred_error_1s": {
+          "mean": 0.23168774942557016,
+          "n": 3,
+          "std": 0.014851653124647953,
+          "values": {
+            "0": 0.24680723249912262,
+            "1": 0.2171192616224289,
+            "2": 0.231136754155159
+          }
+        },
+        "pred_error_h10": {
+          "mean": 0.00935293392588695,
+          "n": 3,
+          "std": 0.0009584783661843296,
+          "values": {
+            "0": 0.009434878826141357,
+            "1": 0.01026780903339386,
+            "2": 0.00835611391812563
+          }
+        },
+        "pred_error_h25": {
+          "mean": 0.056055180728435516,
+          "n": 3,
+          "std": 0.004429327857150369,
+          "values": {
+            "0": 0.05852267146110535,
+            "1": 0.05870119854807854,
+            "2": 0.050941672176122665
+          }
+        },
+        "pred_error_h50_q0": {
+          "mean": 0.08721159398555756,
+          "n": 3,
+          "std": 0.011506067080134668,
+          "values": {
+            "0": 0.09394481778144836,
+            "1": 0.09376402199268341,
+            "2": 0.0739259421825409
+          }
+        },
+        "pred_error_h50_q1": {
+          "mean": 0.16848047574361166,
+          "n": 3,
+          "std": 0.015261226176925142,
+          "values": {
+            "0": 0.18436813354492188,
+            "1": 0.15393424034118652,
+            "2": 0.16713905334472656
+          }
+        },
+        "pred_error_h50_q2": {
+          "mean": 0.38143761952718097,
+          "n": 3,
+          "std": 0.03258719369946982,
+          "values": {
+            "0": 0.40500932931900024,
+            "1": 0.3442508578300476,
+            "2": 0.3950526714324951
+          }
+        },
+        "return_mean": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        },
+        "upright_fraction_second_half": {
+          "mean": NaN,
+          "n": 0,
+          "std": NaN,
+          "values": {
+            "0": NaN,
+            "1": NaN,
+            "2": NaN
+          }
+        }
+      },
+      "runs": {
+        "0": "prediction_error/20261020-012205-3",
+        "1": "prediction_error/20261020-012205-4",
+        "2": "prediction_error/20261020-012205-5"
+      },
+      "superseded": []
     }
   ],
   "patterns": [

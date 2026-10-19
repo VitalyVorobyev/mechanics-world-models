@@ -53,7 +53,7 @@ Every experiment record names one node. A node is closed by a claim in
 | Q1 | **Planner ceiling.** Does MPPI over the true MuJoCo model swing up and balance cartpole from true state? | E-006 | closed (C-015) |
 | Q2 | **Learned mechanics on true state.** Does MPPI over a learned Lagrangian, trained from random data plus a few rounds of its own episodes, reach the ceiling? How does an MLP dynamics model do with the same budget? | E-007 | closed (C-016) |
 | Q3 | **Camera in the loop.** With a sim-trained keypoint reader and a model-based estimator, does the Q2 controller hold its return from camera images, including with a model learned from camera poses? Then the demo. | E-008 | closed (C-017, C-018) |
-| Q4 | **Does the structure pay on a harder system?** On the dm_control two-pole cartpole swing-up (3 DoF, coupled configuration-dependent mass matrix), first on true state: the true-model ceiling, then a learned Lagrangian against an MLP with the same data rounds. The camera stage follows only if the structure shows an advantage. | E-009, E-010 | open |
+| Q4 | **Does the structure pay on a harder system?** On the dm_control two-pole cartpole swing-up (3 DoF, coupled configuration-dependent mass matrix), first on true state: the true-model ceiling, then a learned Lagrangian against an MLP with the same data rounds. The camera stage follows only if the structure shows an advantage. | E-009, E-010 | answered no at the registered thresholds (C-019…C-021); next step is an owner decision |
 
 **Backlog** (not registered; needs a node and an owner decision):
 - `cartpole.three_poles`, the acrobot swing-up (fallback if two poles
