@@ -107,6 +107,13 @@ def test_record_without_stop_branch_is_flagged(tmp_path: Path) -> None:
     assert any("no stop branch" in f.message and f.level == "error" for f in check_records(records))
 
 
+def test_record_with_unknown_status_is_flagged(tmp_path: Path) -> None:
+    records = tmp_path / "experiments"
+    records.mkdir()
+    (records / "E-002-x.md").write_text(RECORD.format(status="registered, pending"))
+    assert any("unknown status" in f.message for f in check_records(records))
+
+
 def test_claim_grades_are_enforced(tmp_path: Path) -> None:
     claims = tmp_path / "claims.md"
     claims.write_text(

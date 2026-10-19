@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from research import ledger as ledger_lib
-from research.records import PROTECTED_SECTIONS, list_records, protected_text, sections, status
+from research.records import PROTECTED_SECTIONS, STATUSES, list_records, protected_text, sections, status
 
 RUN_ID = re.compile(r"\b[a-z][a-z0-9_]*/\d{8}-\d{6}(?:-\d+)?\b")
 CLAIM_HEADING = re.compile(r"^### (C-\d{3})\b")
@@ -114,6 +114,8 @@ def check_records(records_dir: Path) -> list[Finding]:
             findings.append(Finding(level, where, "no budget"))
         if not status(text):
             findings.append(Finding("error", where, "no status"))
+        elif status(text) not in STATUSES:
+            findings.append(Finding("error", where, f"unknown status {status(text)!r}"))
     return findings
 
 
