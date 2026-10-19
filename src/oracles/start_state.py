@@ -100,12 +100,14 @@ def shoot(
     sigma: tuple[float, float] = (1.0, 1.0),
     iterations: int = 8,
     eps: float = 1e-3,
+    init: np.ndarray | None = None,
 ) -> np.ndarray:
     """Levenberg–Marquardt fit of the state at frame ``s - C``; returns that state ``[N, 4]`` (q, q̇).
 
     Per window, a step is kept only if it lowers the weighted residual
     (otherwise the damping grows), so a poor model cannot make the estimate
-    diverge.
+    diverge. ``init [N, 4]`` warm-starts the fit (default: central difference
+    of the first observed poses).
     """
 
     if min(sigma) <= 0:
@@ -113,6 +115,8 @@ def shoot(
     obs, c, dt = w.observed, w.context, w.frame_dt
     weight = 1.0 / np.asarray(sigma)
     state = np.concatenate([obs[:, 0], (obs[:, 2] - obs[:, 0]) / (2 * dt)], axis=1)  # init [N, 4]
+    if init is not None:
+        state = np.asarray(init, dtype=np.float64).copy()
     actions = w.actions[:, :c]
     n = state.shape[0]
 

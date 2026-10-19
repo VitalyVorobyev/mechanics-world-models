@@ -100,6 +100,7 @@ class FixedLagEstimator:
         sigma: tuple[float, float] = (0.02, 0.03),
         gate: tuple[float, float] = (0.15, 0.25),
         iterations: int = 8,
+        warm_iterations: int = 3,
         max_rejects: int = 2,
     ) -> None:
         self.dynamics = dynamics
@@ -107,6 +108,7 @@ class FixedLagEstimator:
         self.sigma = sigma
         self.gate = np.asarray(gate)
         self.iterations = iterations
+        self.warm_iterations = warm_iterations
         self.max_rejects = max_rejects
         self.reset()
 
@@ -116,6 +118,7 @@ class FixedLagEstimator:
         self.state: tuple[NDArray[np.float64], NDArray[np.float64]] | None = None
         self.rejected = 0
         self._in_a_row = 0
+        self._start: NDArray[np.float64] | None = None  # last fitted window-start state [4]
 
     def update(self, pose: NDArray[np.float64], last_action: NDArray[np.float64] | None) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Add the newest pose (θ in any branch) and the action that led to it; return ``(q, q̇)`` now."""
@@ -153,7 +156,13 @@ class FixedLagEstimator:
             observed=observed[None], actions=actions[None], start_q=observed[:1], start_qdot=np.zeros((1, 2)),
             target=np.zeros((1, 0, 2)), context=context, frame_dt=self.dynamics.dt,
         )
-        start = shoot(self.dynamics.rollout, windows, sigma=self.sigma, iterations=self.iterations)
+        # Warm start: once the window slides, last fit's start state moved one frame forward.
+        init, iterations = None, self.iterations
+        if self._start is not None and context == self.window:
+            q0, v0 = self.dynamics.integrate(self._start[None, :2], self._start[None, 2:], self._first_action[None, None])
+            init, iterations = np.concatenate([q0, v0], axis=1), self.warm_iterations
+        start = shoot(self.dynamics.rollout, windows, sigma=self.sigma, iterations=iterations, init=init)
+        self._start, self._first_action = start[0], actions[0]
         q, qdot = self.dynamics.integrate(start[:, :2], start[:, 2:], actions[None])
         self.state = (q[0], qdot[0])
         return self.state
