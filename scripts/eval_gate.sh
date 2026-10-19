@@ -10,7 +10,7 @@
 #   data/cartpole-ood-*-15k-v2/  (bash scripts/collect_cartpole_ood.sh) — optional;
 #     OOD datasets that do not exist yet are skipped.
 #
-# Gate (docs/current_status.md): continue only if, for gate-lagrangian,
+# Gate (docs/archive/status_history_2026-04_to_2026-10-19.md): continue only if, for gate-lagrangian,
 #   1. state_probes.q->pose.mlp R² > 0.8 on the nominal val split,
 #   2. foreground_open_loop_mse_h20 <= the RSSM's on the same sequences, and
 #   3. its h20 degradation on the OOD-v2 sets is smaller than the RSSM's,

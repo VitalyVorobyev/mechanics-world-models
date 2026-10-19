@@ -228,7 +228,7 @@ def compute_factored_kl(
     )
     kl_loss = q_parts["kl_loss"] + qdot_parts["kl_loss"] + z_parts["kl_loss"]
     # Diagnostic scalars for triaging the z-channel phase transition observed
-    # at step ~300 (see docs/current_status.md). Split kl_z by the t=0 anchor
+    # at step ~300 (see docs/archive/status_history_2026-04_to_2026-10-19.md). Split kl_z by the t=0 anchor
     # term (N(0, sigma_p) initial prior) vs the AR(1) transition terms
     # (t>=1); track posterior/prior magnitudes so we can tell whether the
     # encoder's z_mean drifts gradually (story A: weak-prior / over-capacity)

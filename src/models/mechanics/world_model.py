@@ -121,7 +121,7 @@ class MechanicsWorldModel(nn.Module):
     * ``"concat"`` (legacy): the decoder reads ``concat(q, q̇, z)``. Nothing
       stops ``z`` from carrying the pose — on the April 2026 checkpoints a
       probe on ``z`` recovered cart position with R² ≈ 0.85 while ``q`` had
-      collapsed (see ``docs/current_status.md``).
+      collapsed (see ``docs/archive/status_history_2026-04_to_2026-10-19.md``).
     * ``"style"``: the decoder renders from the mechanics coordinates only;
       ``z`` enters as a per-channel gain/offset on the decoder logits, which
       can express colour/brightness nuisance but not where the cart is. The

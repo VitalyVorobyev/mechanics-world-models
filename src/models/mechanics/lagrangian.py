@@ -53,7 +53,7 @@ def _bounded_input(x: torch.Tensor, scale: float) -> torch.Tensor:
     outputs; the dynamics MLPs (mass, potential, dissipation, actuation) are
     untrained SiLU stacks. A tail-of-distribution sample then drives an
     unbounded activation pattern, gradients explode, and AdamW's second-moment
-    estimates get poisoned — see ``docs/current_status.md`` for the observed
+    estimates get poisoned — see ``docs/archive/status_history_2026-04_to_2026-10-19.md`` for the observed
     trace. Squashing each MLP input with ``tanh`` keeps the dynamics-network
     domain compact independent of the encoder's scale, without changing the
     Euler-Lagrange form (the transformation is a smooth, invertible change of

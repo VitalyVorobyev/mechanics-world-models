@@ -1,23 +1,26 @@
 # Mechanics World Models
 
-Research code for visual model-based reinforcement learning with mechanical
-structure in the latent dynamics.
+Research code for camera-driven, mechanics-aware control of mechanical
+systems, starting with DeepMind Control `cartpole-swingup`.
 
-The question behind this repository is simple: can a world model that knows
-something about mechanics generalize better than a generic recurrent latent model
-when the physical system or the visual scene changes? In this project, the target
-is not just better pixel prediction on the training distribution. The target is
-control under shifted mass, length, friction, camera pose, background, and
-lighting.
+The goal: take camera images, be aware of the mechanics of the system
+(an explicit mechanical model whose few physical parameters are
+re-identified when the plant changes), and drive it. The current approach
+is deliberately standard: known-model MPC, a camera front end with a state
+estimator, and online parameter identification. New methods are only
+introduced where a measured gap forces them.
 
-The full research plan is in [`docs/research_spec.md`](docs/research_spec.md).
-Trainable model notes live in [`docs/models/`](docs/models/):
+- Scope, question tree and stop date: [`docs/charter.md`](docs/charter.md)
+- What is happening now: [`docs/current_status.md`](docs/current_status.md)
+- What is established, with graded evidence: [`docs/claims.md`](docs/claims.md)
+- Why the project looks like this (critical review, 2026-10-19):
+  [`docs/review-2026-10-19.md`](docs/review-2026-10-19.md)
+- How research is done here: [`docs/research_protocol.md`](docs/research_protocol.md)
+
+Trainable model notes (end-to-end pixel world models, now frozen) live in
+[`docs/models/`](docs/models/):
 - [minimal RSSM visual world model](docs/models/rssm_visual_world_model.md)
 - [mechanics-structured visual world model](docs/models/mechanics_world_model.md)
-
-The live status of the research — what works, what the open problem is, and
-the next experiment to run — is tracked in
-[`docs/current_status.md`](docs/current_status.md).
 
 ## Current Status
 
@@ -49,13 +52,16 @@ and visual distribution shift:
   dataset, model shapes, losses, finite-diff kinematics, training-history,
   MPS regression guards, probes, and end-to-end evaluation smoke tests
 
-Phase 0 (RSSM stable) is closed. The October 2026 review of the mechanics
-model found that, on the April checkpoints, the pose is carried by the
-nuisance channel rather than by `q`, and the RSSM baseline predicts better
-on identical sequences. The project is now gated on one experiment that
-forces the pose through `q` and compares Lagrangian against MLP dynamics;
-see `docs/current_status.md` for the findings, the gate, and the stop
-criterion.
+Until October 2026 the project tried to *learn* a Lagrangian world model
+end to end from pixels and compare it with the RSSM under distribution
+shift. A review on 2026-10-19 stopped that line: the comparison is crowded
+in the literature, zero-shot "generalization" to new physical parameters is
+ill-posed without an adaptation mechanism, and the standard modular route
+to the actual goal had never been tried. The world-model code above is kept
+and tested but frozen; the oracle harness (`scripts/oracles/`, ground-truth
+tests of each component) and the research bookkeeping
+(`scripts/research/`, a committed run ledger with pre-registration checks)
+carry forward. See [`docs/current_status.md`](docs/current_status.md).
 
 ## Why This Exists
 
@@ -138,7 +144,7 @@ FG-MSE probe):
 
 Train the mechanics model. The recommended cartpole config is the one that
 emerged from the v2/v3/v4/diag debugging (full story in
-`docs/current_status.md`):
+`docs/archive/status_history_2026-04_to_2026-10-19.md`):
 
 ```bash
 .venv/bin/train-mechanics \
@@ -279,17 +285,18 @@ Done:
   serialization in the collector
 - Phase-3 training and evaluation, joint multi-regime training, RSSM with
   reward head (results and their re-interpretation in
-  `docs/current_status.md`)
+  `docs/archive/status_history_2026-04_to_2026-10-19.md`)
+- oracle harness and the true-state few-shot adaptation study (H1b,
+  `docs/claims.md`)
 
-Ahead:
+Ahead (see [`docs/charter.md`](docs/charter.md)):
 
-- gate experiment: `scripts/train_gate.sh lagrangian|mlp`, then
-  `scripts/eval_gate.sh` (continue/stop criteria in
-  `docs/current_status.md`)
-- only if the gate passes: model-agnostic CEM, swing-up-covering data, MPC
-  under physically consistent OOD shifts, ablations
-- keep the implementation inspectable enough to debug failure cases
-  directly
+- E-001: known-model MPC with online parameter fitting on true state
+  (control ceiling, nominal and shifted physics)
+- E-002: camera front end plus EKF in the loop
+- E-003: online parameter identification from camera-estimated states
+- conditional: robust errors-in-variables estimation (E-005); learned
+  structure only if the known model proves inadequate (E-004)
 
 Actor-critic training, replay APIs, zarr storage, and distributed collection
-are deliberately out of scope until the main comparison is complete.
+are deliberately out of scope.

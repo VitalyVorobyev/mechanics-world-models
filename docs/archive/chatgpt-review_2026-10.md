@@ -1,3 +1,5 @@
+> **Archived 2026-10-19.** External review (in Russian) taken into account in the October 2026 review. Superseded by [`../review-2026-10-19.md`](../review-2026-10-19.md).
+
 # Критическое ревью `mechanics-world-models`
 
 **Предварительный вердикт: исследовательский вопрос содержательный, но текущую архитектуру я бы не продолжал обучать без пересмотра нескольких фундаментальных решений.**

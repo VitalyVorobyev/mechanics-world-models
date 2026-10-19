@@ -1,6 +1,6 @@
 #!/bin/bash
 # Closed-loop MPC evaluation grid for the H1 (physical OOD) and H2 (visual
-# OOD) hypotheses from docs/research_spec.md. Runs CEM/MPC on dm_control
+# OOD) hypotheses from docs/archive/research_spec_2026-04.md. Runs CEM/MPC on dm_control
 # cartpole-swingup for both the RSSM B1 baseline and the mechanics B_main
 # checkpoint, across:
 #   - 1 nominal condition

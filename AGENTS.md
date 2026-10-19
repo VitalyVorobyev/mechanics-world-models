@@ -1,18 +1,20 @@
 # Agent Notes
 
-This is a Python research codebase for mechanics-structured visual world models
-for visual model-based RL. The public README is now written for GitHub readers;
-keep detailed setup, debugging, and day-to-day commands in `docs/development.md`.
-Use `docs/research_spec.md` as the source of truth for the long-term research
-direction.
+This is a Python research codebase. Goal (owner, 2026-10-19): camera-driven,
+mechanics-aware control of a mechanical system (dm_control cartpole first),
+built from standard components; novelty is not an objective. The public
+README is written for GitHub readers; keep detailed setup, debugging, and
+day-to-day commands in `docs/development.md`. The active scope is
+`docs/charter.md` (question tree, budget, stop date, decision log).
 
 ## Project Scope
 
-- Current baseline: random-policy cartpole pixel data, NPZ episode storage,
-  PyTorch sequence datasets, and a compact RSSM-style visual world model.
-- Research target: mechanics-structured latent dynamics with factored
-  `(q, qdot, z_nuisance)`, learned Lagrangian dynamics, Rayleigh dissipation,
-  and MPC evaluation under physical and visual distribution shift.
+- Main line: known-model MPC with online parameter identification, then a
+  camera front end plus state estimator in the loop (experiments E-001 →
+  E-003 under `docs/experiments/`).
+- Frozen: the end-to-end pixel world models (RSSM, `MechanicsWorldModel`),
+  their trainers and evaluators. Keep their tests green; no new development
+  unless the charter reopens them.
 - Do not add actor-critic training, replay buffers, zarr storage, distributed
   collection, or augmentation pipelines unless a task explicitly asks for them.
 - Do not make research-performance claims in public docs unless they are backed
@@ -20,24 +22,34 @@ direction.
 
 ## Research Protocol (binding)
 
-Follow [`docs/research_protocol.md`](docs/research_protocol.md). In short:
+Follow [`docs/research_protocol.md`](docs/research_protocol.md) (v2). In short:
 
-- [`docs/hypotheses.md`](docs/hypotheses.md) is the source of truth for
-  hypotheses *and* assumptions. Cite its IDs in other docs, and update it in
-  the same commit as the code or result that changes an entry.
-- Before any run longer than about an hour, write the prediction, the
-  decision rule and the prerequisite oracle results into the registry entry
-  it tests. A run whose outcome would change nothing is not run.
-- Climb the oracle ladder (`scripts/oracles/`: intervention effect,
-  decoder / encoder / dynamics oracles, overfit one batch, pilot) before
-  end-to-end training. Results go to `runs/oracles/`.
-- Report every metric next to its floor (copy last frame / mean image) and
-  its ceiling (oracle with true state).
+- Work only on charter nodes. A new direction needs an owner decision in the
+  charter's decision log.
+- Every experiment is a record `docs/experiments/E-NNN-*.md`
+  (`scripts/research/new_experiment.py`). Its protected sections
+  (Prediction, Primary metric with a `Report:` line, Baselines, Decision rule
+  with a **stop** branch) are committed **before** any run, and the record
+  must be `approved` by the owner before anything that trains, simulates at
+  scale or takes more than about 10 minutes.
+- Run from a clean tree with `--experiment E-NNN`. Oracle CLIs refuse a dirty
+  tree unless `--allow-dirty` (ungradeable). Each run appends to the
+  committed `results/ledger.jsonl`. Never cite results of scratch scripts as
+  evidence; commit the script first.
+- Tables come from `scripts/research/report.py`, never typed by hand. Claims
+  go to `docs/claims.md` with a grade (A/B/C) and ledger run IDs;
+  `docs/hypotheses.md` stays a one-line-per-entry index.
+- Bracket every result: floor, black box, known model, ceiling or bound.
+  Offer an improvement given to one arm to the others, or record the
+  asymmetry.
 - For any surprise: list at least three explanations and run the cheapest
-  test that tells them apart, before planning further.
-- Long runs must be observable and resumable (progress file, mid-epoch
-  checkpoints, graceful stop). Compute-heavy runs need the user's go-ahead
-  for that experiment.
+  test that tells them apart.
+- Chain-depth limit: three consecutive "diagnose further" outcomes on one node
+  force a zoom-out note and an owner decision. Stop at 150% of a budget.
+- `.venv/bin/python scripts/research/check.py` must pass (it also runs in the
+  test suite). Rewrite `docs/current_status.md` at the end of each session.
+- Long runs must be observable and resumable (progress file, checkpoints,
+  graceful stop).
 
 ## Documentation
 
@@ -45,8 +57,8 @@ Follow [`docs/research_protocol.md`](docs/research_protocol.md). In short:
   start, data format, and roadmap.
 - Keep operational details in `docs/development.md`: setup, collection, dataset
   stats, training, plotting, testing, and debugging commands.
-- Keep research framing in `docs/research_spec.md`; do not silently rewrite the
-  hypotheses, baselines, or kill criteria without an explicit task.
+- Keep research framing in `docs/charter.md`; change it only by an owner
+  decision recorded in its decision log. History goes to `docs/archive/`.
 - Keep one clear, concise document in `docs/models/` for every trainable model.
   Each model document must cover purpose, architecture and parameter count,
   objective function, optimizer, and relation to other models. Add a document

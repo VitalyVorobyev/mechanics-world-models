@@ -1,3 +1,5 @@
+> **Archived 2026-10-19.** The April 2026 research specification, kept as history. The active scope is [`../charter.md`](../charter.md); why it changed is in [`../review-2026-10-19.md`](../review-2026-10-19.md). Its hypotheses H1–H3, kill criteria K1–K3, timeline and the "first systematic" novelty claim are no longer in force.
+
 # Mechanics-Structured Visual World Models for Out-of-Distribution Control
 
 *Research Specification — Visual RL on Apple Silicon*

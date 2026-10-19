@@ -1,7 +1,7 @@
 #!/bin/bash
 # Collect four mildly-perturbed cartpole datasets for the joint OOD training
 # experiment that tests the gauge-freedom hypothesis behind Phase-3's K2
-# failure. See docs/current_status.md for context.
+# failure. See docs/archive/status_history_2026-04_to_2026-10-19.md for context.
 #
 # Training regimes are kept mild (×0.7 / ×1.3) so the research-spec OOD grid
 # (mass ×{0.5, 1.5, 2.0}, length ×{0.5, 1.5}) still has held-out points.

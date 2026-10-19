@@ -4,15 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Intent
 
-Research code for mechanics-structured visual world models for model-based RL on `dm_control cartpole-swingup` pixels. The repository contains **two trainable world models**: an unstructured RSSM baseline (B1) and a factored `(q, qdot, z_nuisance)` model (B_main) with a learned Lagrangian, Rayleigh dissipation, and a symplectic integrator (plus an `--dynamics-form mlp` control arm). Phase-1 scaffolding (reward head, CEM/MPC for the RSSM, physics-perturbation wrapper, visual distractors, `eval-control`) is in place. After the October 2026 review the project is gated on one decisive experiment (see `docs/current_status.md`); the ablations B2/B3/B4 and the OOD MPC grid wait on that gate. **Do not add actor-critic, replay buffers, zarr, distributed collection, or augmentation pipelines unless a task explicitly asks for them.**
+Goal (owner, 2026-10-19): a system that takes **camera images**, is **aware of the mechanics**, and **drives a mechanical system** (dm_control cartpole first, later e.g. a robot arm). Novelty is not an objective: build from standard components and invent only where a measured gap forces it. The active scope, question tree, budget and **stop date** are in `docs/charter.md`; do not work outside its nodes without an owner decision. The main line is the modular pipeline (known-model MPC → camera front end + EKF → online parameter identification; experiments E-001 → E-003).
 
-**Research protocol (binding, see `AGENTS.md`):** follow `docs/research_protocol.md`. Keep `docs/hypotheses.md` (registry of hypotheses and assumptions, with falsifying tests) current. Before any run longer than ~1 h, write the prediction and decision rule there and pass the relevant oracle rungs (`scripts/oracles/`, results in `runs/oracles/`). Report metrics with their floor and ceiling. For surprises, list competing explanations and run the cheapest discriminating test first.
+The repository also contains two end-to-end pixel world models (RSSM baseline; `MechanicsWorldModel` with a learned Lagrangian) and their trainers/evaluators. They are **frozen**: keep their tests green, do not develop them further unless the charter reopens them. **Do not add actor-critic, replay buffers, zarr, distributed collection, or augmentation pipelines unless a task explicitly asks for them.**
+
+**Research protocol v2 (binding, see `AGENTS.md`):** follow `docs/research_protocol.md`. In short: experiments are records `docs/experiments/E-NNN-*.md`, registered by committing their prediction / primary metric / baselines / decision rule (with a stop branch) *before* running, and run only once the owner has approved them; runs use `--experiment E-NNN` from a clean tree (oracle CLIs refuse dirty trees unless `--allow-dirty`) and append to the committed `results/ledger.jsonl`; tables come from `scripts/research/report.py`, never typed by hand; claims go to `docs/claims.md` with grades A/B/C; three "diagnose further" outcomes in a row on one node force a zoom-out and an owner decision. Run `.venv/bin/python scripts/research/check.py` at the start and end of a session.
+
+Session routine: read `docs/charter.md`, `docs/current_status.md`, `docs/claims.md` and the open experiment records first. At the end, generate reports, update claims and `docs/hypotheses.md`, **rewrite** (do not append to) `docs/current_status.md`, and list the decisions waiting on the owner.
 
 Authoritative docs:
-- `docs/research_spec.md` — long-term research direction; do not silently rewrite hypotheses, baselines, or kill criteria.
-- `docs/development.md` — setup, collection, training, evaluation, debugging commands (prefer this over README for day-to-day).
-- `docs/current_status.md` — where the project actually is today. Start with its "October 2026 Review" section: on the April checkpoints the pose lives in the nuisance `z` (not `q`); the RSSM with reward head beats the mechanics model on identical sequences at every horizon; the April model dt was 2× too small; the April "length" OOD data scaled a rail, not the pole; `eval-control` cannot run the mechanics model. The current next step is the user-run gate experiment (`scripts/train_gate.sh lagrangian|mlp`, `scripts/eval_gate.sh`) with explicit continue/stop criteria. `docs/chatgpt-review.md` is an independent review that was taken into account.
-- `docs/models/*.md` — one concise document per trainable model (currently `rssm_visual_world_model.md` and `mechanics_world_model.md`); update it when the model, loss, optimizer, or default training config changes. Add a new doc when introducing a new trainable model.
+- `docs/charter.md` — goal, root question Q0, question tree, budget, stop date, decision log. Changes only by owner decision.
+- `docs/current_status.md` — one page: what is happening now and what waits on the owner.
+- `docs/claims.md` — graded facts with ledger evidence ("what do we know").
+- `docs/hypotheses.md` — compact index of hypotheses and assumptions.
+- `docs/review-2026-10-19.md` — critical review behind the current charter (why the world-model line stopped; process failures found).
+- `docs/development.md` — setup, collection, training, evaluation, debugging and research-tooling commands (prefer this over README for day-to-day).
+- `docs/models/*.md` — one concise document per trainable model; update it when the model, loss, optimizer, or default training config changes.
+- `docs/archive/`, `docs/experiments/archive/` — history (April spec, status log up to 2026-10-19, the full 2026-10-18/19 registry). Read only when a claim cites it.
 - `AGENTS.md` — authoritative for agent conventions; this file summarizes.
 
 ## Environment and Commands

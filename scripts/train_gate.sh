@@ -1,5 +1,5 @@
 #!/bin/bash
-# Gate experiment (October 2026 review, docs/current_status.md "Gate").
+# Gate experiment (October 2026 review, docs/archive/status_history_2026-04_to_2026-10-19.md "Gate").
 #
 # Trains the mechanics model with the pose forced through q:
 #   --nuisance-mode style    decoder renders from q only; z = per-channel colour

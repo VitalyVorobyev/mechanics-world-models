@@ -296,6 +296,40 @@ Resume from the latest checkpoint:
   --resume-from checkpoints/rssm-cartpole-random-100k/latest.pt
 ```
 
+## Research Bookkeeping (protocol v2)
+
+See [`research_protocol.md`](research_protocol.md). The day-to-day commands:
+
+```bash
+# hygiene check: ledger provenance, pre-registration, claims, charter (also in pytest)
+.venv/bin/python scripts/research/check.py
+
+# new experiment record (status draft); fill the protected sections, commit = registration
+.venv/bin/python scripts/research/new_experiment.py --slug my-test --title "…" --node Q1 --hypotheses H-CTRL
+
+# run an oracle for a registered, approved experiment (refuses a dirty tree)
+.venv/bin/python scripts/oracles/context_oracle.py --experiment E-004 …
+
+# seed-aggregated table into the record + results/E-NNN/summary.json
+.venv/bin/python scripts/research/report.py E-004
+
+# ad-hoc aggregation over any result files (exploration / audits)
+.venv/bin/python scripts/research/report.py --glob 'runs/oracles/context_oracle/2026*.json' \
+    --where 'shifts=["gear_x1.3","gear_x0.5","gear_x2","gear_x3"]' \
+    --metric '{shift}.k1.mlp_ctx.dev_h20 / {shift}.k1.lag_ctx.dev_h20'
+
+# import result files that predate the ledger (idempotent)
+.venv/bin/python scripts/research/import_legacy.py 'runs/oracles/*/2026*.json'
+```
+
+Every oracle CLI accepts `--experiment E-NNN` and `--allow-dirty`. Results
+record the full commit, dirty paths, argv, package versions, data and
+source fingerprints, and append one line to the committed
+`results/ledger.jsonl`. Oracle caches are keyed by the source fingerprint
+of `src/oracles/` and `src/models/mechanics/`. Caches written before
+2026-10-19 used the config hash alone; `export_demo.py` still falls back
+to them.
+
 ## Oracle Diagnostics (run before end-to-end training)
 
 The oracle ladder from [`research_protocol.md`](research_protocol.md). Each
@@ -382,9 +416,9 @@ render`, cartpole only) and the extra losses (`--latent-dynamics-weight`,
 
 ## Train The Mechanics Model
 
-### Gate experiment (October 2026, current)
+### Gate experiment (October 2026, stopped; frozen)
 
-See the review section of [`current_status.md`](current_status.md) for why
+See the review section of [`archive/status_history_2026-04_to_2026-10-19.md`](archive/status_history_2026-04_to_2026-10-19.md) for why
 and for the pass criteria. The whole experiment runs as one resumable
 pipeline (OOD-v2 collection → both training arms → evaluation → report):
 
@@ -425,7 +459,7 @@ with `state_probes.q->pose.mlp` and `foreground_open_loop_mse_h20` in each
 ### April 2026 configuration (historical)
 
 The config that emerged from the v2/v3/v4/diag debugging documented in
-[`current_status.md`](current_status.md). `scripts/train_mechanics.sh`
+[`archive/status_history_2026-04_to_2026-10-19.md`](archive/status_history_2026-04_to_2026-10-19.md). `scripts/train_mechanics.sh`
 holds it verbatim. It passes `--dt 0.01`, which is half the true frame
 interval, and uses the `concat` nuisance mode in which `z` ends up carrying
 the pose:
@@ -456,7 +490,7 @@ Notes:
 - `--nuisance-dim 4` + `--nuisance-min-std 1.0` together control the
   nuisance channel's capacity × KL-stiffness. Larger values on either
   triggered a z-channel KL phase transition at step ~300 in earlier
-  iterations; see `current_status.md` for the trace.
+  iterations; see `archive/status_history_2026-04_to_2026-10-19.md` for the trace.
 - `--log-every-steps 50` still keeps the z-diagnostic metrics
   (`z_post_mean_rms`, `kl_z_t0_mean`, `kl_z_transition_mean`, ...)
   dense enough to catch the earlier failure modes (the v2/v3 z blow-up
@@ -510,7 +544,7 @@ rendering, and in the April scripts `geom_size_2_1` pointed at the rail
 > and document what was actually run.
 
 When the nominal-only run fails K2 (as Phase-3 finitediff did — see
-`docs/current_status.md`), the next experiment trains the same mechanics
+`docs/archive/status_history_2026-04_to_2026-10-19.md`), the next experiment trains the same mechanics
 architecture on a joint dataset spanning nominal + mildly-perturbed
 physics. The four prep + run scripts:
 
@@ -540,7 +574,7 @@ so the val split mixes regimes deterministically.
 > works. The grid's length points now use `pole_length`.
 
 When K2 stays broken across nominal + joint runs (as documented in
-`docs/current_status.md`) but the structured model still produces clean
+`docs/archive/status_history_2026-04_to_2026-10-19.md`) but the structured model still produces clean
 pixel trajectories, the right move is to test H1 / H2 directly via
 closed-loop MPC return rather than continue chasing K2. Three scripts:
 

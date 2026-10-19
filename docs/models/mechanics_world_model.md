@@ -178,7 +178,7 @@ Default cartpole training configuration:
 - generalized coordinate dim `d = 2` (cartpole)
 - nuisance dim `k = 4` (kept small — cartpole has near-zero visual
   style variation, and larger `k` triggered a KL blow-up in earlier
-  iterations; see `docs/current_status.md`)
+  iterations; see `docs/archive/status_history_2026-04_to_2026-10-19.md`)
 - shared encoder embedding `E = 256`
 - decoder input dim `2d + k = 8` (legacy `concat` mode; see options below)
 - integrator step `dt`: resolved from the dataset when `--dt` is omitted
@@ -374,7 +374,7 @@ Default optimizer settings:
 
 The recommended live-training config (from
 `scripts/train_mechanics.sh`, derived by the v2/v3/v4/diag debugging
-iterations documented in `docs/current_status.md`):
+iterations documented in `docs/archive/status_history_2026-04_to_2026-10-19.md`):
 
 ```
 kl_weight                                      = 0.1

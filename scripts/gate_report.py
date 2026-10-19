@@ -4,7 +4,7 @@ Usage: .venv/bin/python scripts/gate_report.py [--output runs/gate/report.md]
 
 Reads the metrics.json files written by scripts/eval_gate.sh for the
 ``lagrangian`` and ``mlp`` gate arms and the ``rssm`` baseline, and applies
-the criteria from docs/current_status.md ("Gate"):
+the criteria from docs/archive/status_history_2026-04_to_2026-10-19.md ("Gate"):
 
 1. gate-lagrangian ``state_probes.q->pose.mlp`` R² > 0.8 (nominal val split);
 2. its nominal fg open-loop MSE at h20 <= the RSSM's;
@@ -151,7 +151,7 @@ def build_report() -> tuple[str, dict[str, Any]]:
         if not complete
         else "PASS — continue to the MPC phase"
         if all(criteria.values())
-        else "FAIL — stop criterion applies (see docs/current_status.md)"
+        else "FAIL — stop criterion applies (see docs/archive/status_history_2026-04_to_2026-10-19.md)"
     )
     lines += ["", f"**Verdict: {verdict}**", ""]
     return "\n".join(lines), {"criteria": criteria, "verdict": verdict, "ood_ratios": ratios}
